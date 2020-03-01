@@ -1,6 +1,6 @@
 # elm-wss: Simple websockets for elm
 
-This is a simple implementation of websockets for elm, relying on the `port` mechanism available in elm `0.19`[^1]. It aims to be readable and easy to understand.
+This is a simple implementation of websockets for elm, relying on the `port` mechanism available in elm `0.19`. It aims to be readable and easy to understand.
 
 # Usage
 
@@ -47,5 +47,3 @@ Each websocket namespaced by a handle (a `String`), somewhat similar to a file s
 # Example
 
 An small [example](example/) application is available.
-
-[^1]: As of 0.19, Elm does not longer ship with built-in websockets.
