@@ -21,7 +21,7 @@ type alias Model =
 
 
 type Message
-    = WebsocketReceived (WSS.Msg String)
+    = WebsocketReceived WSS.Msg
 
 
 wsHandle =
@@ -42,7 +42,7 @@ update : Message -> Model -> ( Model, Cmd msg )
 update msg model =
     case msg of
         WebsocketReceived WSS.Established ->
-            Debug.log ("YAY" ++ Debug.toString msg) ( model, WSS.send (WSS.Transmit "HELLO?") wsHandle )
+            Debug.log (Debug.toString msg) ( model, WSS.send (WSS.Transmit "HELLO?") wsHandle )
 
         WebsocketReceived wsmsg ->
             Debug.log (Debug.toString msg) ( model, Cmd.none )
@@ -50,7 +50,7 @@ update msg model =
 
 subscriptions : Model -> Sub Message
 subscriptions _ =
-    Sub.map WebsocketReceived <| WSS.subscribe D.string
+    Sub.map WebsocketReceived <| WSS.subscribeAny
 
 
 main =

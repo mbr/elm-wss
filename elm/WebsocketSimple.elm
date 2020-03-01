@@ -1,4 +1,4 @@
-port module WebsocketSimple exposing (Cmd(..), Msg(..), send, subscribe)
+port module WebsocketSimple exposing (Cmd(..), Msg(..), send, subscribe, subscribeAny)
 
 import Json.Decode as D
 import Json.Encode as E
@@ -7,9 +7,21 @@ import Platform.Cmd
 import Result.Extra
 
 
-subscribe : D.Decoder wmsg -> Sub (Msg wmsg)
-subscribe decoder =
-    wsMsg (decodeWsMsg decoder)
+{-| A handler is given a websocket handle and a message and turns it into a an
+application message
+-}
+type alias Handler msg =
+    String -> Msg -> msg
+
+
+subscribe : Handler msg -> Sub msg
+subscribe handler =
+    wsMsg (decodeWsMsg handler)
+
+
+subscribeAny : Sub Msg
+subscribeAny =
+    subscribe (\_ msg -> msg)
 
 
 type alias WebSocketHandle =
@@ -20,16 +32,20 @@ type alias Url =
     String
 
 
+
+{- -}
+
+
 type Cmd
     = Open Url (Maybe String)
     | Transmit String
     | Close (Maybe Int) (Maybe String)
 
 
-type Msg wmsg
+type Msg
     = Established
     | Closed
-    | Text wmsg
+    | Text String
     | Error String
 
 
@@ -56,7 +72,7 @@ encodeWsCmd cmd =
             )
 
 
-decodeHelper : D.Decoder v -> (v -> Msg wmsg) -> D.Value -> Msg wmsg
+decodeHelper : D.Decoder v -> (v -> Msg) -> D.Value -> Msg
 decodeHelper decoder map value =
     D.decodeValue decoder value
         |> Result.map map
@@ -64,23 +80,25 @@ decodeHelper decoder map value =
             (\e -> Error ("decoding error in incoming channel message: " ++ D.errorToString e))
 
 
-decodeWsMsg : D.Decoder wmsg -> ( String, E.Value ) -> Msg wmsg
-decodeWsMsg msgDecoder ( kind, data ) =
-    case kind of
-        "established" ->
-            Established
+decodeWsMsg : Handler msg -> ( String, String, E.Value ) -> msg
+decodeWsMsg handler ( handle, kind, data ) =
+    handler handle
+        (case kind of
+            "established" ->
+                Established
 
-        "closed" ->
-            Closed
+            "closed" ->
+                Closed
 
-        "error" ->
-            decodeHelper D.string Error data
+            "error" ->
+                decodeHelper D.string Error data
 
-        "message" ->
-            decodeHelper msgDecoder Text data
+            "message" ->
+                decodeHelper D.string Text data
 
-        _ ->
-            Error ("Received an invalid message through channel: " ++ kind)
+            _ ->
+                Error ("Received an invalid message through channel: " ++ kind)
+        )
 
 
 send : Cmd -> WebSocketHandle -> Platform.Cmd.Cmd msg
@@ -102,4 +120,4 @@ port wsCmd : ( WebSocketHandle, String, E.Value ) -> Platform.Cmd.Cmd msg
 
 {-| Websocket incoming port.
 -}
-port wsMsg : (( String, E.Value ) -> msg) -> Sub msg
+port wsMsg : (( String, String, E.Value ) -> msg) -> Sub msg

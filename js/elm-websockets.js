@@ -53,11 +53,11 @@ ElmWebsockets = (function() {
             ws.onclose = function(closeEvent) {
               // TODO: code, reason, wasClean
               debug(handle, "[onclose]", closeEvent);
-              app.ports.wsMsg.send(["closed", null]);
+              app.ports.wsMsg.send([handle, "closed", null]);
             };
             ws.onerror = function(errorEvent) {
               debug(handle, "[onerror]", errorEvent);
-              app.ports.wsMsg.send(["error", errorEvent.message]);
+              app.ports.wsMsg.send([handle, "error", errorEvent.message]);
             };
             ws.onmessage = function(messageEvent) {
               debug(handle, "[onmessage]", messageEvent);
@@ -67,10 +67,11 @@ ElmWebsockets = (function() {
               // console.log("INCOMING", messageEvent);
               switch (typeof messageEvent.data) {
                 case "string":
-                  app.ports.wsMsg.send(["message", messageEvent.data]);
+                  app.ports.wsMsg.send([handle, "message", messageEvent.data]);
                   break;
                 default:
                   app.ports.wsMsg.send([
+                    handle,
                     "error",
                     "Received non-string message of type " +
                       typeof messageEvent.data +
@@ -83,7 +84,7 @@ ElmWebsockets = (function() {
               debug(handle, "[onopen]", event);
 
               app.webSockets[handle] = ws;
-              app.ports.wsMsg.send(["established", null]);
+              app.ports.wsMsg.send([handle, "established", null]);
             };
             break;
 
@@ -93,7 +94,7 @@ ElmWebsockets = (function() {
             if (app.webSockets.hasOwnProperty(handle)) {
               app.webSockets[handle].send(data);
             } else {
-              app.ports.wsMsg.send(["error", "cannot transmit on closed websocket"])
+              app.ports.wsMsg.send([handle, "error", "cannot transmit on closed websocket"])
             }
 
 
