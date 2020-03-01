@@ -42,7 +42,7 @@ subscriptions _ =
     Sub.map WebsocketReceived <| Ws.subscribe
 ```
 
-Each websocket namespaced by a handle (a `String`), somewhat similar to a file socket in systems programming. Handles are created by the elm application, but are optional. If desired, use `sendWithHandle` and `subscribeWithHandle` instead of their basic counterparts `send` and `subscribe`.
+Each websocket is namespaced by a handle (a `String`), somewhat similar to a file socket in systems programming. Handles are created by the elm application, but are optional. If desired, use `sendWithHandle` and `subscribeWithHandle` instead of their basic counterparts `send` and `subscribe`.
 
 # Example
 
