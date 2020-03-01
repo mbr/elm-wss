@@ -1,53 +1,101 @@
 module Main exposing (..)
 
+{-| Example application for websockets
+-}
+
 import Browser
-import Html exposing (text)
-import Json.Decode as D
-import Json.Encode as E
+import Html exposing (Html, div, text)
 import WebsocketSimple as Ws
 
 
-type alias WebSocketHandle =
-    String
+{-| Model, stores event log
 
+Anything command sent or event received is stored for this demo.
 
-type alias Url =
-    String
-
-
+-}
 type alias Model =
-    Int
+    List Event
 
 
+{-| An event log entry
+-}
+type Event
+    = Sent Ws.Cmd
+    | WebsocketEvent Ws.Msg
+
+
+{-| The sole message we can receive is a websocket one
+-}
 type Message
     = WebsocketReceived Ws.Msg
 
 
-init : () -> ( Model, Cmd msg )
+{-| Initialize application
+
+Will connect to an example echo websocket immediately
+
+-}
+init : () -> ( Model, Cmd Message )
 init _ =
-    ( 0, Ws.send (Ws.Open "wss://echo.websocket.org/" Nothing) )
+    let
+        cmd =
+            Ws.Open "wss://echo.websocket.org/" Nothing
+    in
+    ( [ Sent cmd ], Ws.send cmd )
 
 
+{-| Render event log as HTML
+-}
 view : Model -> Browser.Document msg
-view _ =
-    Browser.Document "Hello!" [ text "Hi!" ]
+view model =
+    Browser.Document "Websockets example"
+        [ div [] (List.map viewEvent model)
+        ]
 
 
+{-| Render a single event log entry
+-}
+viewEvent : Event -> Html msg
+viewEvent event =
+    case event of
+        Sent cmd ->
+            div [] [ text <| "send -> " ++ Debug.toString cmd ]
+
+        WebsocketEvent msg ->
+            div [] [ text <| "recv <- " ++ Debug.toString msg ]
+
+
+{-| Note that a specific message has been received and response, log
+-}
+receiveSend : Ws.Msg -> Ws.Cmd -> Model -> ( Model, Cmd msg )
+receiveSend event cmd model =
+    ( model ++ [ WebsocketEvent event, Sent cmd ], Ws.send cmd )
+
+
+{-| Core update function
+-}
 update : Message -> Model -> ( Model, Cmd msg )
 update msg model =
     case msg of
-        WebsocketReceived Ws.Established ->
-            Debug.log (Debug.toString msg) ( model, Ws.send (Ws.Transmit "HELLO?") )
+        WebsocketReceived (Ws.Established as w) ->
+            receiveSend w (Ws.Transmit "Test message") model
 
-        WebsocketReceived wsmsg ->
-            Debug.log (Debug.toString msg) ( model, Cmd.none )
+        WebsocketReceived ((Ws.Text t) as w) ->
+            receiveSend w (Ws.Close Nothing Nothing) model
+
+        WebsocketReceived w ->
+            ( model ++ [ WebsocketEvent w ], Cmd.none )
 
 
+{-| Setup app subscriptions
+-}
 subscriptions : Model -> Sub Message
 subscriptions _ =
     Sub.map WebsocketReceived <| Ws.subscribe
 
 
+{-| Main entry point
+-}
 main =
     Browser.document
         { init = init
