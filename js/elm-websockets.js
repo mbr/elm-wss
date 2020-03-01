@@ -101,9 +101,10 @@ ElmWebsockets = (function() {
             break;
 
           case "close":
-            debug(handle, "[close]", app.webSockets.hasOwnProperty(handle));
+            debug(handle, "[close]", app.webSockets.hasOwnProperty(handle), data);
             if (app.webSockets.hasOwnProperty(handle)) {
-              app.webSockets[handle].close(data.code, data.reason);
+              // TODO: Report an error on invalid codes.
+              app.webSockets[handle].close(data.code || 1000, data.reason || "");
               delete app.webSockets[handle];
             }
             // If not openend, we simply ignore it.
