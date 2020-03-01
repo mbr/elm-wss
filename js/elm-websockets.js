@@ -21,11 +21,13 @@
 ElmWebsockets = (function() {
   var pub = {};
 
-  pub.initApp = function(app) {
+  pub.initApp = function(app, enableDebug) {
     if (app.ports && app.ports.wsCmd) {
       app.webSockets = {};
 
       app.ports.wsCmd.subscribe(function(msg) {
+        var debug = enableDebug ? console.log : function() {};
+
         var handle = msg[0];
         var cmd = msg[1];
         var data = msg[2];
@@ -45,14 +47,21 @@ ElmWebsockets = (function() {
             // TODO: Catch illegal string error.
             // TODO: Catch security exception error.
             var ws = new WebSocket(data.url, data.protocol);
+            if (debug) {
+              debug(handle, "created new websocket", ws);
+            }
             ws.onclose = function(closeEvent) {
               // TODO: code, reason, wasClean
+              debug(handle, "[onclose]", closeEvent);
               app.ports.wsMsg.send(["closed", null]);
             };
             ws.onerror = function(errorEvent) {
+              debug(handle, "[onerror]", errorEvent);
               app.ports.wsMsg.send(["error", errorEvent.message]);
             };
             ws.onmessage = function(messageEvent) {
+              debug(handle, "[onmessage]", messageEvent);
+
               // We need to differentiate different types of data here.
               // TODO: origin, lastEventId, source, ports?
               // console.log("INCOMING", messageEvent);
@@ -71,16 +80,34 @@ ElmWebsockets = (function() {
               }
             };
             ws.onopen = function(event) {
-              app.ports.wsMsg.send(["open", null]);
+              debug(handle, "[onopen]", event);
+
+              app.webSockets[handle] = ws;
+              app.ports.wsMsg.send(["established", null]);
             };
             break;
+
+          case "transmit":
+            debug(handle, "[send]", data);
+
+            if (app.webSockets.hasOwnProperty(handle)) {
+              app.webSockets[handle].send(data);
+            } else {
+              app.ports.wsMsg.send(["error", "cannot transmit on closed websocket"])
+            }
+
+
+            break;
+
           case "close":
-            if (app.webSocekts.hasOwnProperty(handle)) {
+            debug(handle, "[close]", app.webSockets.hasOwnProperty(handle));
+            if (app.webSockets.hasOwnProperty(handle)) {
               app.webSockets[handle].close(data.code, data.reason);
               delete app.webSockets[handle];
             }
             // If not openend, we simply ignore it.
             break;
+
           default:
             console.log("Received unknown command from elm:", cmd);
         }

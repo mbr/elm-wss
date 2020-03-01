@@ -22,11 +22,12 @@ type alias Url =
 
 type Cmd
     = Open Url (Maybe String)
+    | Transmit String
     | Close (Maybe Int) (Maybe String)
 
 
 type Msg wmsg
-    = Openend
+    = Established
     | Closed
     | Text wmsg
     | Error String
@@ -42,6 +43,9 @@ encodeWsCmd cmd =
                 , ( "protocol", Ex.maybe E.string protocol )
                 ]
             )
+
+        Transmit data ->
+            ( "transmit", E.string data )
 
         Close code reason ->
             ( "close"
@@ -63,10 +67,10 @@ decodeHelper decoder map value =
 decodeWsMsg : D.Decoder wmsg -> ( String, E.Value ) -> Msg wmsg
 decodeWsMsg msgDecoder ( kind, data ) =
     case kind of
-        "open" ->
-            Openend
+        "established" ->
+            Established
 
-        "close" ->
+        "closed" ->
             Closed
 
         "error" ->
