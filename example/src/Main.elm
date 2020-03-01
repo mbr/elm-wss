@@ -4,7 +4,7 @@ import Browser
 import Html exposing (text)
 import Json.Decode as D
 import Json.Encode as E
-import WebsocketSimple as WSS
+import WebsocketSimple as Ws
 
 
 type alias WebSocketHandle =
@@ -20,12 +20,12 @@ type alias Model =
 
 
 type Message
-    = WebsocketReceived WSS.Msg
+    = WebsocketReceived Ws.Msg
 
 
 init : () -> ( Model, Cmd msg )
 init _ =
-    ( 0, WSS.send (WSS.Open "wss://echo.websocket.org/" Nothing) )
+    ( 0, Ws.send (Ws.Open "wss://echo.websocket.org/" Nothing) )
 
 
 view : Model -> Browser.Document msg
@@ -36,8 +36,8 @@ view _ =
 update : Message -> Model -> ( Model, Cmd msg )
 update msg model =
     case msg of
-        WebsocketReceived WSS.Established ->
-            Debug.log (Debug.toString msg) ( model, WSS.send (WSS.Transmit "HELLO?") )
+        WebsocketReceived Ws.Established ->
+            Debug.log (Debug.toString msg) ( model, Ws.send (Ws.Transmit "HELLO?") )
 
         WebsocketReceived wsmsg ->
             Debug.log (Debug.toString msg) ( model, Cmd.none )
@@ -45,7 +45,7 @@ update msg model =
 
 subscriptions : Model -> Sub Message
 subscriptions _ =
-    Sub.map WebsocketReceived <| WSS.subscribe
+    Sub.map WebsocketReceived <| Ws.subscribe
 
 
 main =
