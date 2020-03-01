@@ -24,13 +24,9 @@ type Message
     = WebsocketReceived WSS.Msg
 
 
-wsHandle =
-    "default"
-
-
 init : () -> ( Model, Cmd msg )
 init _ =
-    ( 0, WSS.send (WSS.Open "wss://echo.websocket.org/" Nothing) wsHandle )
+    ( 0, WSS.send (WSS.Open "wss://echo.websocket.org/" Nothing) )
 
 
 view : Model -> Browser.Document msg
@@ -42,7 +38,7 @@ update : Message -> Model -> ( Model, Cmd msg )
 update msg model =
     case msg of
         WebsocketReceived WSS.Established ->
-            Debug.log (Debug.toString msg) ( model, WSS.send (WSS.Transmit "HELLO?") wsHandle )
+            Debug.log (Debug.toString msg) ( model, WSS.send (WSS.Transmit "HELLO?") )
 
         WebsocketReceived wsmsg ->
             Debug.log (Debug.toString msg) ( model, Cmd.none )
@@ -50,7 +46,7 @@ update msg model =
 
 subscriptions : Model -> Sub Message
 subscriptions _ =
-    Sub.map WebsocketReceived <| WSS.subscribeAny
+    Sub.map WebsocketReceived <| WSS.subscribe
 
 
 main =
