@@ -4,7 +4,6 @@ import Browser
 import Html exposing (text)
 import Json.Decode as D
 import Json.Encode as E
-import Json.Encode.Extra as Ex
 import WebsocketSimple as WSS
 
 

@@ -33,7 +33,6 @@ called. Subscribe to websocket messages through `subscribe`, send them using
 import Json.Decode as D
 import Json.Encode as E
 import Platform.Cmd
-import Result.Extra
 
 
 {-| A handle identifies a particular websocket
