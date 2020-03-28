@@ -29,7 +29,7 @@ import WebsocketSimple as Ws
 
 {|- Example message type for the app -}
 type Message =
-    WebsocketReceived Ws.Msg
+    WebsocketReceived Ws.RawMsg
 
 {|- This example show how to open a websocket -}
 openWebsocket : Cmd msg

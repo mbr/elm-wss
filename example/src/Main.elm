@@ -21,13 +21,13 @@ type alias Model =
 -}
 type Event
     = Sent Ws.Cmd
-    | WebsocketEvent Ws.Msg
+    | WebsocketEvent Ws.RawMsg
 
 
 {-| The sole message we can receive is a websocket one
 -}
 type Message
-    = WebsocketReceived Ws.Msg
+    = WebsocketReceived Ws.RawMsg
 
 
 {-| Initialize application
@@ -67,7 +67,7 @@ viewEvent event =
 
 {-| Note that a specific message has been received and response, log
 -}
-receiveSend : Ws.Msg -> Ws.Cmd -> Model -> ( Model, Cmd msg )
+receiveSend : Ws.RawMsg -> Ws.Cmd -> Model -> ( Model, Cmd msg )
 receiveSend event cmd model =
     ( model ++ [ WebsocketEvent event, Sent cmd ], Ws.send cmd )
 

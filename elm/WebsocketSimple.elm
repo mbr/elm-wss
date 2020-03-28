@@ -20,7 +20,7 @@
 -}
 
 
-port module WebsocketSimple exposing (Cmd(..), Msg(..), send, sendWithHandle, subscribe, subscribeWithHandle)
+port module WebsocketSimple exposing (Cmd(..), RawMsg(..), send, sendWithHandle, subscribe, subscribeWithHandle)
 
 {-| The simple websockets module.
 
@@ -52,14 +52,14 @@ type alias Url =
 Yields tuples of `(handler, msg)`
 
 -}
-subscribeWithHandle : Sub ( WebSocketHandle, Msg )
+subscribeWithHandle : Sub ( WebSocketHandle, RawMsg )
 subscribeWithHandle =
     wsMsg decodeWsMsg
 
 
 {-| Subscribe for incoming messages, discarding handler information
 -}
-subscribe : Sub Msg
+subscribe : Sub RawMsg
 subscribe =
     Sub.map Tuple.second subscribeWithHandle
 
@@ -103,12 +103,11 @@ type Cmd
   - `Error` on any kind of internal or external error
 
 -}
-type Msg
+type RawMsg
     = Established
     | Closed
     | Text String
     | Error String
-
 
 {-| Helper function to encode a command to be sent over the channel
 -}
@@ -137,7 +136,7 @@ encodeWsCmd cmd =
 
 {-| Decode a JSON string, yield an `Error` on failure
 -}
-decodeHelper : D.Decoder v -> (v -> Msg) -> D.Value -> Msg
+decodeHelper : D.Decoder v -> (v -> RawMsg) -> D.Value -> RawMsg
 decodeHelper decoder map value =
     D.decodeValue decoder value
         |> Result.map map
@@ -147,7 +146,7 @@ decodeHelper decoder map value =
 
 {-| Decode an incoming websocket message from javascript
 -}
-decodeWsMsg : ( WebSocketHandle, String, E.Value ) -> ( WebSocketHandle, Msg )
+decodeWsMsg : ( WebSocketHandle, String, E.Value ) -> ( WebSocketHandle, RawMsg )
 decodeWsMsg ( handle, kind, data ) =
     ( handle
     , case kind of
