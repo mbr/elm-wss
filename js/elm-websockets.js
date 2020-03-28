@@ -53,7 +53,7 @@ ElmWebsockets = (function() {
             ws.onclose = function(closeEvent) {
               // TODO: code, reason, wasClean
               debug(handle, "[onclose]", closeEvent);
-              app.ports.wsMsg.send([handle, "closed", null]);
+              app.ports.wsMsg.send([handle, "disconnected", null]);
             };
             ws.onerror = function(errorEvent) {
               debug(handle, "[onerror]", errorEvent);
@@ -84,7 +84,7 @@ ElmWebsockets = (function() {
               debug(handle, "[onopen]", event);
 
               app.webSockets[handle] = ws;
-              app.ports.wsMsg.send([handle, "established", null]);
+              app.ports.wsMsg.send([handle, "connected", null]);
             };
             break;
 

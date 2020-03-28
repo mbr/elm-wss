@@ -77,7 +77,7 @@ receiveSend event cmd model =
 update : Message -> Model -> ( Model, Cmd msg )
 update msg model =
     case msg of
-        WebsocketReceived (Ws.Established as w) ->
+        WebsocketReceived (Ws.Connected as w) ->
             receiveSend w (Ws.Transmit "Test message") model
 
         WebsocketReceived ((Ws.Text t) as w) ->
