@@ -22,8 +22,9 @@
 
 port module WebsocketSimple exposing
     ( Cmd(..)
-    , RawMsg(..)
     , Msg(..)
+    , RawMsg(..)
+    , close
     , open
     , parseIncoming
     , send
@@ -100,9 +101,19 @@ send : Cmd -> Platform.Cmd.Cmd msg
 send =
     sendWithHandle "default"
 
-{-| Connect to a specified socket as default -}
+
+{-| Connect to a specified socket as default
+-}
 open : String -> Platform.Cmd.Cmd msg
-open url = send <| Open url Nothing
+open url =
+    send <| Open url Nothing
+
+
+{-| Close the default connection
+-}
+close : Platform.Cmd.Cmd msg
+close =
+    send <| Close Nothing Nothing
 
 
 {-| JSON-encode a message and send it to the `default` socket
