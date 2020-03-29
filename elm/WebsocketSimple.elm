@@ -23,6 +23,8 @@
 port module WebsocketSimple exposing
     ( Cmd(..)
     , RawMsg(..)
+    , Msg(..)
+    , open
     , parseIncoming
     , send
     , sendWithHandle
@@ -76,9 +78,9 @@ subscribe =
 
 {-| Subscribe and parse JSON of incoming messages, discarding handler info
 -}
-subscribeMsg : D.Decoder t -> Sub (Msg t)
-subscribeMsg dec =
-    Sub.map (parseIncoming dec) subscribe
+subscribeMsg : D.Decoder t -> (Msg t -> msg) -> Sub msg
+subscribeMsg dec wrap =
+    Sub.map (parseIncoming dec >> wrap) subscribe
 
 
 {-| Send a message to a websocket specified by handle
@@ -97,6 +99,10 @@ sendWithHandle handle cmd =
 send : Cmd -> Platform.Cmd.Cmd msg
 send =
     sendWithHandle "default"
+
+{-| Connect to a specified socket as default -}
+open : String -> Platform.Cmd.Cmd msg
+open url = send <| Open url Nothing
 
 
 {-| JSON-encode a message and send it to the `default` socket
