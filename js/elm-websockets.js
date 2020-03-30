@@ -46,7 +46,7 @@ ElmWebsockets = (function() {
 
             // TODO: Catch illegal string error.
             // TODO: Catch security exception error.
-            var ws = new WebSocket(data.url, data.protocol);
+            var ws = new WebSocket(data.url, data.protocol || []);
             if (debug) {
               debug(handle, "created new websocket", ws);
             }
