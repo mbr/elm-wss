@@ -31,7 +31,7 @@ import WebsocketSimple as Ws
 type Message =
     WebsocketReceived Ws.RawMsg
 
-{|- This example show how to open a websocket -}
+{|- This example shows how to open a websocket -}
 openWebsocket : Cmd msg
 openWebsocket url = Ws.send (Ws.Open url Nothing)
 
