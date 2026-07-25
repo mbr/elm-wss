@@ -1,49 +1,128 @@
-# elm-wss: Simple websockets for elm
+# elm-wss: Simple WebSockets for Elm
 
-This is a simple implementation of websockets for elm, relying on the `port` mechanism available in elm `0.19`. It aims to be readable and easy to understand.
+A small Elm 0.19 wrapper around the browser `WebSocket` API. It consists of an
+Elm port module and a readable JavaScript runtime.
 
-# Usage
+## How it works
 
-Because Elm packages containing `port` modules cannot be published, the easiest way to use this package is to either copy the two files into your source dir or link them using a git submodule:
+`WebsocketSimple.elm` sends commands through `wsCmd`. `elm-websockets.js`
+performs the browser operation and returns events through `wsMsg`.
 
-`elm-websockets.js` should be sourced by your `index.html`, either or after loading the elm source. Once the elm app has been loaded, call `ElmSockets.init_app(app)` on your elm application `app` to initialize the ports. Example:
+```text
+Elm command -> wsCmd -> JavaScript -> WebSocket
+Elm message <- wsMsg <- JavaScript <- browser event
+```
+
+## Installation
+
+Because Elm packages containing `port` modules cannot be published, copy or
+link these files into your application:
+
+- `elm/WebsocketSimple.elm` into an Elm source directory
+- `js/elm-websockets.js` into your browser assets
+
+Load the runtime and your compiled Elm application, initialize Elm, then
+initialize the runtime:
 
 ```html
 <script src="elm-websockets.js"></script>
 <script src="app.js"></script>
 <script>
 var app = Elm.Main.init({
-  node: document.getElementById('elm')
+  node: document.getElementById("elm")
 });
 ElmWebsockets.initApp(app);
 </script>
 ```
 
-(`app.js` is your compiled Elm-Apps source). You can pass a second parameter of `true` to `initApp` to enable debug console output.
+Pass `true` as the second argument to `initApp` to log WebSocket activity.
 
-`WebsocketSimple.elm` is a single port module that handles sending and receiving websocket messages via ports. Calling `WebsocketSimple.send` sends commands to the websockets handler outside of elm.
+## Usage
+
+Subscribe before opening a socket. Wait for `Connected` before transmitting.
 
 ```elm
 import WebsocketSimple as Ws
 
 
-{|- Example message type for the app -}
-type Message =
-    WebsocketReceived Ws.RawMsg
-
-{|- This example shows how to open a websocket -}
-openWebsocket : Cmd msg
-openWebsocket url = Ws.send (Ws.Open url Nothing)
+type alias Model =
+    List String
 
 
-{|- How to subscribe to incoming messages -}
-subscriptions : Model -> Sub Message
+type Msg
+    = WebSocketEvent Ws.RawMsg
+
+
+init : () -> ( Model, Cmd Msg )
+init _ =
+    ( [], Ws.open "ws://127.0.0.1:8765" )
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    case msg of
+        WebSocketEvent Ws.Connected ->
+            ( model, Ws.send (Ws.Transmit "hello") )
+
+        WebSocketEvent (Ws.Text value) ->
+            ( value :: model, Ws.close )
+
+        WebSocketEvent Ws.Disconnected ->
+            ( model, Cmd.none )
+
+        WebSocketEvent (Ws.RawError error) ->
+            ( error :: model, Cmd.none )
+
+
+subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Sub.map WebsocketReceived <| Ws.subscribe
+    Sub.map WebSocketEvent Ws.subscribe
 ```
 
-Each websocket is namespaced by a handle (a `String`), somewhat similar to a file socket in systems programming. Handles are created by the elm application, but are optional. If desired, use `sendWithHandle` and `subscribeWithHandle` instead of their basic counterparts `send` and `subscribe`.
+### Commands
 
-# Example
+- `Open url protocol` opens a socket with an optional subprotocol.
+- `Transmit text` sends a text frame.
+- `Close code reason` closes it with an optional code and reason.
 
-An small [example](example/) application is available.
+`open` and `close` are shortcuts for the default socket.
+
+### Events
+
+- `Connected` means the socket is ready to transmit.
+- `Disconnected` means it closed.
+- `Text value` contains a text frame.
+- `RawError message` reports a runtime or port error.
+
+### Handles
+
+The convenience functions use the handle `"default"`. Use `sendWithHandle` and
+`subscribeWithHandle` for multiple sockets; incoming values then include the
+handle that produced them.
+
+### JSON
+
+`transmitMsg` JSON-encodes a value before sending it. `subscribeMsg` applies a
+JSON decoder and returns `Established`, `Closed`, `Received value`, or
+`Error message`. Use `parseIncoming` when decoding a `RawMsg` explicitly.
+
+## Limitations
+
+- Only text frames are supported.
+- Sending is valid only after `Connected` and before `Disconnected`.
+- A socket cannot be closed through this wrapper while it is still connecting.
+- Reconnection, replay, authentication, and application protocols belong to the
+  application.
+- Browser security rules still apply; in particular, HTTPS pages normally need
+  `wss` endpoints.
+- Call `ElmWebsockets.initApp` once for each Elm application.
+
+## Example
+
+Start a local echo server:
+
+```sh
+websocat -E --text ws-l:127.0.0.1:8765 mirror:
+```
+
+From `example/`, run `./build.sh`, then open `index.html`.

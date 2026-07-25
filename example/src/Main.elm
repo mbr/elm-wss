@@ -39,7 +39,7 @@ init : () -> ( Model, Cmd Message )
 init _ =
     let
         cmd =
-            Ws.Open "wss://echo.websocket.org/" Nothing
+            Ws.Open "ws://127.0.0.1:8765" Nothing
     in
     ( [ Sent cmd ], Ws.send cmd )
 
