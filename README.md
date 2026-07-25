@@ -4,7 +4,7 @@ This is a simple implementation of websockets for elm, relying on the `port` mec
 
 # Usage
 
-There is no integration with elm-packages, the easiest way to use this package is to either copy the two files into your source dir or link them using a git submodule:
+Because Elm packages containing `port` modules cannot be published, the easiest way to use this package is to either copy the two files into your source dir or link them using a git submodule:
 
 `elm-websockets.js` should be sourced by your `index.html`, either or after loading the elm source. Once the elm app has been loaded, call `ElmSockets.init_app(app)` on your elm application `app` to initialize the ports. Example:
 
