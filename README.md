@@ -56,7 +56,7 @@ update msg model =
             ( model, Cmd.none )
 
         WebSocketEvent (Ws.RawError error) ->
-            ( error :: model, Cmd.none )
+            ( error.message :: model, Cmd.none )
 
 
 subscriptions : Model -> Sub Msg
@@ -125,14 +125,30 @@ type alias CloseDetails =
     }
 
 
+type TransportErrorKind
+    = ConstructionFailure
+    | SendFailure
+    | CloseFailure
+    | BrowserFailure
+    | SendRejection
+    | UnsupportedData
+    | PortDecodingFailure
+
+
+type alias TransportError =
+    { kind : TransportErrorKind
+    , message : String
+    }
+
+
 type RawMsg
     = Connected
     | Disconnected CloseDetails
     | Text String
-    | RawError String
+    | RawError TransportError
 ```
 
-`Connected` means the socket is ready to transmit. `Disconnected` includes the browser's close code, reason and `wasClean` flag, plus whether the close was initiated locally; it may occur even if the socket never connected. `Text` contains a text frame. Binary messages are unsupported and produce `RawError`, as do runtime and port errors.
+`Connected` means the socket is ready to transmit. `Disconnected` includes the browser's close code, reason and `wasClean` flag, plus whether the close was initiated locally; it may occur even if the socket never connected. `Text` contains a text frame. `RawError` identifies construction, send, close, browser, unsupported-data, and port-decoding failures while retaining a readable message.
 
 ### JSON
 
@@ -160,7 +176,7 @@ subscriptions _ =
     Ws.subscribeMsg payloadDecoder WebSocketMessage
 ```
 
-The resulting messages are `Established`, `Closed`, `Received`, or `Error`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. Use `parseIncoming` when decoding a `RawMsg` explicitly.
+The resulting messages are `Established`, `Closed`, `Received`, `TransportFailure`, or `PayloadDecodeFailure`. Payload decoding failures retain the original text and `Json.Decode.Error`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. Use `parseIncoming` when decoding a `RawMsg` explicitly.
 
 ## Example
 

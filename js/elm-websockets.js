@@ -25,6 +25,14 @@ ElmWebsockets = (function() {
     if (app.ports && app.ports.wsCmd) {
       app.webSockets = new Map();
 
+      function emitError(handle, kind, message) {
+        app.ports.wsMsg.send([
+          handle,
+          "error",
+          { kind: kind, message: message }
+        ]);
+      }
+
       function reportError(handle, operation, error) {
         var message = "websocket " + operation + " failed";
         if (error && typeof error.message === "string" && error.message) {
@@ -32,7 +40,7 @@ ElmWebsockets = (function() {
         } else if (typeof error === "string" && error) {
           message += ": " + error;
         }
-        app.ports.wsMsg.send([handle, "error", message]);
+        emitError(handle, operation, message);
       }
 
       app.ports.wsCmd.subscribe(function(msg) {
@@ -98,11 +106,11 @@ ElmWebsockets = (function() {
                   app.ports.wsMsg.send([handle, "message", messageEvent.data]);
                   break;
                 default:
-                  app.ports.wsMsg.send([
+                  emitError(
                     handle,
-                    "error",
+                    "unsupported-data",
                     "received unsupported binary websocket message"
-                  ]);
+                  );
                   break;
               }
             };
@@ -127,10 +135,12 @@ ElmWebsockets = (function() {
                 reportError(handle, "send", error);
               }
             } else {
-              app.ports.wsMsg.send([handle, "error", "cannot transmit unless websocket is open"])
+              emitError(
+                handle,
+                "send-rejection",
+                "cannot transmit unless websocket is open"
+              );
             }
-
-
             break;
 
           case "close":
@@ -143,7 +153,7 @@ ElmWebsockets = (function() {
                 reportError(handle, "close", error);
               }
             }
-            // If not openend, we simply ignore it.
+            // Closing an absent socket is a no-op.
             break;
 
           default:
