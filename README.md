@@ -1,18 +1,15 @@
 # elm-wss: Simple WebSockets for Elm
 
-A small Elm 0.19 wrapper around the browser `WebSocket` API. It consists of an
-Elm port module and a readable JavaScript runtime.
+This is a simple implementation of websockets for elm, relying on the `port` mechanism available in elm `0.19`. It aims to be readable and easy to understand.
 
 ## Installation
 
-Because Elm packages containing `port` modules cannot be published, copy or
-link these files into your application:
+Because Elm packages containing `port` modules cannot be published, copy or link these files into your application:
 
 - `elm/WebsocketSimple.elm` into an Elm source directory
 - `js/elm-websockets.js` into your browser assets
 
-Load the runtime and your compiled Elm application, initialize Elm, then
-initialize the runtime:
+Load the runtime and your compiled Elm application, initialize Elm, then initialize the runtime:
 
 ```html
 <script src="elm-websockets.js"></script>
@@ -25,7 +22,7 @@ ElmWebsockets.initApp(app);
 </script>
 ```
 
-Pass `true` as the second argument to `initApp` to log WebSocket activity.
+Pass `true` as the second argument to `initApp` to log WebSocket activity using `console.log`.
 
 ## Usage
 
@@ -86,25 +83,19 @@ subscriptions _ =
 
 ### Handles
 
-The convenience functions use the handle `"default"`. Use `sendWithHandle` and
-`subscribeWithHandle` for multiple sockets; incoming values then include the
-handle that produced them.
+The convenience functions use the handle `"default"`. Use `sendWithHandle` and `subscribeWithHandle` for multiple sockets; incoming values then include the handle that produced them.
 
 ### JSON
 
-`transmitMsg` JSON-encodes a value before sending it. `subscribeMsg` applies a
-JSON decoder and returns `Established`, `Closed`, `Received value`, or
-`Error message`. Use `parseIncoming` when decoding a `RawMsg` explicitly.
+`transmitMsg` JSON-encodes a value before sending it. `subscribeMsg` applies a JSON decoder and returns `Established`, `Closed`, `Received value`, or `Error message`. Use `parseIncoming` when decoding a `RawMsg` explicitly.
 
 ## Limitations
 
 - Only text frames are supported.
 - Sending is valid only after `Connected` and before `Disconnected`.
 - A socket cannot be closed through this wrapper while it is still connecting.
-- Reconnection, replay, authentication, and application protocols belong to the
-  application.
-- Browser security rules still apply; in particular, HTTPS pages normally need
-  `wss` endpoints.
+- Reconnection, replay, authentication, and application protocols belong to the application.
+- Browser security rules still apply; in particular, HTTPS pages normally need `wss` endpoints.
 - Call `ElmWebsockets.initApp` once for each Elm application.
 
 ## Example
