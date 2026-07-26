@@ -47,6 +47,7 @@ ElmWebsockets = (function() {
             // TODO: Catch illegal string error.
             // TODO: Catch security exception error.
             var ws = new WebSocket(data.url, data.protocol || []);
+            app.webSockets.set(handle, ws);
             if (debug) {
               debug(handle, "created new websocket", ws);
             }
@@ -83,7 +84,6 @@ ElmWebsockets = (function() {
             ws.onopen = function(event) {
               debug(handle, "[onopen]", event);
 
-              app.webSockets.set(handle, ws);
               app.ports.wsMsg.send([handle, "connected", null]);
             };
             break;
@@ -91,8 +91,9 @@ ElmWebsockets = (function() {
           case "transmit":
             debug(handle, "[send]", data);
 
-            if (app.webSockets.has(handle)) {
-              app.webSockets.get(handle).send(data);
+            var ws = app.webSockets.get(handle);
+            if (ws && ws.readyState === WebSocket.OPEN) {
+              ws.send(data);
             } else {
               app.ports.wsMsg.send([handle, "error", "cannot transmit on closed websocket"])
             }

@@ -160,7 +160,6 @@ The resulting messages are `Established`, `Closed`, `Received payload`, or `Erro
 
 - Only text frames are supported.
 - Sending is valid only after `Connected` and before `Disconnected`.
-- A socket cannot be closed through this wrapper while it is still connecting.
 - Reconnection, replay, authentication, and application protocols belong to the application.
 - Browser security rules still apply; in particular, HTTPS pages normally need `wss` endpoints.
 - Call `ElmWebsockets.initApp` once for each Elm application.
