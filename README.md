@@ -114,7 +114,7 @@ type Cmd
     | Close (Maybe Int) (Maybe String)
 ```
 
-`Open` accepts a URL and optional subprotocol. `Transmit` emits `RawError` when the socket is not open. `Close` accepts an optional code and reason. `open` and `close` are shortcuts for the default socket.
+`Open` accepts a URL and optional subprotocol. `Transmit` emits `RawError` if the socket is not open or the browser rejects the operation. Otherwise it emits no event; WebSocket provides no per-message delivery acknowledgement. `Close` accepts an optional code and reason. `open` and `close` are shortcuts for the default socket.
 
 ### Events
 
