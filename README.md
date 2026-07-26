@@ -22,8 +22,6 @@ ElmWebsockets.initApp(app);
 </script>
 ```
 
-Pass `true` as the second argument to `initApp` to log WebSocket activity using `console.log`.
-
 ## Usage
 
 Subscribe before opening a socket. Wait for `Connected` before transmitting.

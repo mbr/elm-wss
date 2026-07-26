@@ -21,7 +21,7 @@
 ElmWebsockets = (function() {
   var pub = {};
 
-  pub.initApp = function(app, enableDebug) {
+  pub.initApp = function(app) {
     if (app.ports && app.ports.wsCmd) {
       app.webSockets = new Map();
 
@@ -36,8 +36,6 @@ ElmWebsockets = (function() {
       }
 
       app.ports.wsCmd.subscribe(function(msg) {
-        var debug = enableDebug ? console.log : function() {};
-
         var handle = msg[0];
         var cmd = msg[1];
         var data = msg[2];
@@ -67,15 +65,11 @@ ElmWebsockets = (function() {
               socket: ws
             };
             app.webSockets.set(handle, entry);
-            if (debug) {
-              debug(handle, "created new websocket", ws);
-            }
             ws.onclose = function(closeEvent) {
               if (app.webSockets.get(handle) !== entry) {
                 return;
               }
               app.webSockets.delete(handle);
-              debug(handle, "[onclose]", closeEvent);
               app.ports.wsMsg.send([
                 handle,
                 "disconnected",
@@ -91,18 +85,14 @@ ElmWebsockets = (function() {
               if (app.webSockets.get(handle) !== entry) {
                 return;
               }
-              debug(handle, "[onerror]", errorEvent);
               reportError(handle, "transport", errorEvent);
             };
             ws.onmessage = function(messageEvent) {
               if (app.webSockets.get(handle) !== entry) {
                 return;
               }
-              debug(handle, "[onmessage]", messageEvent);
 
               // We need to differentiate different types of data here.
-              // TODO: origin, lastEventId, source, ports?
-              // console.log("INCOMING", messageEvent);
               switch (typeof messageEvent.data) {
                 case "string":
                   app.ports.wsMsg.send([handle, "message", messageEvent.data]);
@@ -116,22 +106,19 @@ ElmWebsockets = (function() {
                   break;
               }
             };
-            ws.onopen = function(event) {
+            ws.onopen = function() {
               if (
                 app.webSockets.get(handle) !== entry ||
                 ws.readyState !== WebSocket.OPEN
               ) {
                 return;
               }
-              debug(handle, "[onopen]", event);
 
               app.ports.wsMsg.send([handle, "connected", null]);
             };
             break;
 
           case "transmit":
-            debug(handle, "[send]", data);
-
             var entry = app.webSockets.get(handle);
             if (entry && entry.socket.readyState === WebSocket.OPEN) {
               try {
@@ -147,7 +134,6 @@ ElmWebsockets = (function() {
             break;
 
           case "close":
-            debug(handle, "[close]", app.webSockets.has(handle), data);
             if (app.webSockets.has(handle)) {
               var entry = app.webSockets.get(handle);
               try {
