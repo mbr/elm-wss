@@ -56,7 +56,7 @@ update msg model =
             ( model, Cmd.none )
 
         WebSocketEvent (Ws.TransportError error) ->
-            ( error.message :: model, Cmd.none )
+            ( Ws.errorToString error :: model, Cmd.none )
 
 
 subscriptions : Model -> Sub Msg
@@ -148,7 +148,7 @@ type RawMsg
     | TransportError TransportErrorDetails
 ```
 
-`Connected` means the socket is ready to transmit. `Disconnected` includes the browser's close code, reason and `wasClean` flag, plus whether the close was initiated locally; it may occur even if the socket never connected. `Text` contains a text frame. `TransportError` identifies construction, send, close, browser, unsupported-data, and port-decoding failures while retaining a readable message.
+`Connected` means the socket is ready to transmit. `Disconnected` includes the browser's close code, reason and `wasClean` flag, plus whether the close was initiated locally; it may occur even if the socket never connected. `Text` contains a text frame. `TransportError` identifies construction, send, close, browser, unsupported-data, and port-decoding failures. Use `errorToString` to obtain its readable message.
 
 ### JSON
 
