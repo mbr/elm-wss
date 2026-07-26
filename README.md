@@ -130,7 +130,31 @@ type RawMsg
 
 ### JSON
 
-`transmitMsg` JSON-encodes a value before sending it. `subscribeMsg` applies a JSON decoder and returns `Established`, `Closed`, `Received value`, or `Error message`. Use `parseIncoming` when decoding a `RawMsg` explicitly.
+Regular subscriptions expose incoming text frames as `Text String`. For JSON messages, use `subscribeMsg` with a decoder instead:
+
+```elm
+import Json.Decode as Decode
+
+
+type alias Payload =
+    { message : String }
+
+
+payloadDecoder : Decode.Decoder Payload
+payloadDecoder =
+    Decode.map Payload (Decode.field "message" Decode.string)
+
+
+type Msg
+    = WebSocketMessage (Ws.Msg Payload)
+
+
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+    Ws.subscribeMsg payloadDecoder WebSocketMessage
+```
+
+The resulting messages are `Established`, `Closed`, `Received payload`, or `Error message`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. Use `parseIncoming` when decoding a `RawMsg` explicitly.
 
 ## Limitations
 
