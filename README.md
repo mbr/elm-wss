@@ -107,18 +107,26 @@ subscriptions _ =
 
 ### Commands
 
-- `Open url protocol` opens a socket with an optional subprotocol.
-- `Transmit text` sends a text frame.
-- `Close code reason` closes it with an optional code and reason.
+```elm
+type Cmd
+    = Open String (Maybe String)
+    | Transmit String
+    | Close (Maybe Int) (Maybe String)
+```
 
-`open` and `close` are shortcuts for the default socket.
+`Open` accepts a URL and optional subprotocol. `Close` accepts an optional code and reason. `open` and `close` are shortcuts for the default socket.
 
 ### Events
 
-- `Connected` means the socket is ready to transmit.
-- `Disconnected` means it closed.
-- `Text value` contains a text frame.
-- `RawError message` reports a runtime or port error.
+```elm
+type RawMsg
+    = Connected
+    | Disconnected
+    | Text String
+    | RawError String
+```
+
+`Connected` means the socket is ready to transmit. `Text` contains a text frame. `RawError` reports a runtime or port error.
 
 ### JSON
 
