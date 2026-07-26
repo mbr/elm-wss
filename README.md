@@ -84,7 +84,7 @@ sendChat message =
 
 closeChat : Cmd msg
 closeChat =
-    Ws.sendWithHandle "chat" (Ws.Close Nothing Nothing)
+    Ws.sendWithHandle "chat" (Ws.Close Nothing)
 ```
 
 Use `subscribeWithHandle` to receive the originating handle with each event:
@@ -106,13 +106,19 @@ subscriptions _ =
 ### Commands
 
 ```elm
+type alias CloseRequest =
+    { code : Int
+    , reason : String
+    }
+
+
 type Cmd
     = Open String (Maybe String)
     | Transmit String
-    | Close (Maybe Int) (Maybe String)
+    | Close (Maybe CloseRequest)
 ```
 
-`Open` accepts a URL and optional subprotocol. `Transmit` emits `TransportError` if the socket is not open or the browser rejects the operation. Otherwise it emits no event; WebSocket provides no per-message delivery acknowledgement. `Close` accepts an optional code and reason. `open` and `close` are shortcuts for the default socket.
+`Open` accepts a URL and optional subprotocol. `Transmit` emits `TransportError` if the socket is not open or the browser rejects the operation. Otherwise it emits no event; WebSocket provides no per-message delivery acknowledgement. `Close Nothing` preserves the browser's default close behavior; `Close (Just request)` sends its code and reason. Use an empty reason to send only a code. `open` and `close` are shortcuts for the default socket.
 
 ### Events
 

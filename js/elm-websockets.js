@@ -147,7 +147,11 @@ ElmWebsockets = (function() {
             if (app.webSockets.has(handle)) {
               var entry = app.webSockets.get(handle);
               try {
-                entry.socket.close(data.code || 1000, data.reason || "");
+                if (data.code === null) {
+                  entry.socket.close();
+                } else {
+                  entry.socket.close(data.code, data.reason);
+                }
                 entry.initiatedLocally = true;
               } catch (error) {
                 reportError(handle, "close", error);

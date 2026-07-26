@@ -22,6 +22,7 @@
 
 port module WebsocketSimple exposing
     ( CloseDetails
+    , CloseRequest
     , Cmd(..)
     , Msg(..)
     , RawMsg(..)
@@ -72,6 +73,14 @@ type alias CloseDetails =
     , reason : String
     , wasClean : Bool
     , initiatedLocally : Bool
+    }
+
+
+{-| Describes an application-requested close
+-}
+type alias CloseRequest =
+    { code : Int
+    , reason : String
     }
 
 
@@ -182,7 +191,7 @@ open url =
 -}
 close : Platform.Cmd.Cmd msg
 close =
-    send <| Close Nothing Nothing
+    send <| Close Nothing
 
 
 {-| JSON-encode a message and send it to the `default` socket
@@ -196,13 +205,13 @@ transmitMsg enc msg =
 
   - `Open` opens a connection to the specified URL, with an optional protocol
   - `Transmit` sends a text message string
-  - `Close` closes the connection, with an optional code and reason
+  - `Close` closes the connection with optional close details
 
 -}
 type Cmd
     = Open Url (Maybe String)
     | Transmit String
-    | Close (Maybe Int) (Maybe String)
+    | Close (Maybe CloseRequest)
 
 
 {-| Messages that are received from websockets
@@ -273,11 +282,20 @@ encodeWsCmd cmd =
         Transmit data ->
             ( "transmit", E.string data )
 
-        Close code reason ->
+        Close closeRequest ->
+            let
+                ( code, reason ) =
+                    case closeRequest of
+                        Just request ->
+                            ( E.int request.code, E.string request.reason )
+
+                        Nothing ->
+                            ( E.null, E.null )
+            in
             ( "close"
             , E.object
-                [ ( "code", maybe E.int code )
-                , ( "reason", maybe E.string reason )
+                [ ( "code", code )
+                , ( "reason", reason )
                 ]
             )
 

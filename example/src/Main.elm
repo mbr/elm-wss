@@ -81,7 +81,7 @@ update msg model =
             receiveSend w (Ws.Transmit "Test message") model
 
         WebsocketReceived ((Ws.Text t) as w) ->
-            receiveSend w (Ws.Close Nothing Nothing) model
+            receiveSend w (Ws.Close Nothing) model
 
         WebsocketReceived w ->
             ( model ++ [ WebsocketEvent w ], Cmd.none )
