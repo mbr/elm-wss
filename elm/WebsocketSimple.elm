@@ -184,7 +184,7 @@ send =
 -}
 open : String -> Platform.Cmd.Cmd msg
 open url =
-    send <| Open url Nothing
+    send <| Open url []
 
 
 {-| Close the default connection
@@ -203,27 +203,27 @@ transmitMsg enc msg =
 
 {-| Command that can be sent to a websocket:
 
-  - `Open` opens a connection to the specified URL, with an optional protocol
+  - `Open` opens a connection to the specified URL with ordered subprotocols
   - `Transmit` sends a text message string
   - `Close` closes the connection with optional close details
 
 -}
 type Cmd
-    = Open Url (Maybe String)
+    = Open Url (List String)
     | Transmit String
     | Close (Maybe CloseRequest)
 
 
 {-| Messages that are received from websockets
 
-  - `Connected` when the connection succeeds
+  - `Connected` when the connection succeeds, with the negotiated subprotocol
   - `Disconnected` when the connection has been terminated, with close details
   - `Text` when a new text-message has arrived on the socket
   - `TransportError` on a transport or port error
 
 -}
 type RawMsg
-    = Connected
+    = Connected (Maybe String)
     | Disconnected CloseDetails
     | Text String
     | TransportError TransportErrorDetails
@@ -236,7 +236,7 @@ errors separate from payload decoding failures.
 
 -}
 type Msg t
-    = Established
+    = Established (Maybe String)
     | Closed CloseDetails
     | Received t
     | TransportFailure TransportErrorDetails
@@ -248,8 +248,8 @@ type Msg t
 parseIncoming : D.Decoder t -> RawMsg -> Msg t
 parseIncoming decoder rawMsg =
     case rawMsg of
-        Connected ->
-            Established
+        Connected protocol ->
+            Established protocol
 
         Disconnected details ->
             Closed details
@@ -271,11 +271,11 @@ parseIncoming decoder rawMsg =
 encodeWsCmd : Cmd -> ( String, E.Value )
 encodeWsCmd cmd =
     case cmd of
-        Open url protocol ->
+        Open url protocols ->
             ( "open"
             , E.object
                 [ ( "url", E.string url )
-                , ( "protocol", maybe E.string protocol )
+                , ( "protocols", E.list E.string protocols )
                 ]
             )
 
@@ -378,7 +378,7 @@ decodeWsMsg ( handle, kind, data ) =
     ( handle
     , case kind of
         "connected" ->
-            Connected
+            decodeHelper (D.nullable D.string) Connected data
 
         "disconnected" ->
             decodeHelper decodeCloseDetails Disconnected data
@@ -448,38 +448,3 @@ extract f x =
 
         Err e ->
             f e
-
-
-
--- from `Json.Encode.Extra`
-{- Json.Encode.Extra is licensed using the MIT License
-   The MIT License (MIT)
-
-   Copyright (c) 2016 CircuitHub Inc., Elm Community members
-
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-
-   The above copyright notice and this permission notice shall be included in all
-   copies or substantial portions of the Software.
-
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-   SOFTWARE.
-
-
-
--}
-
-
-maybe : (a -> E.Value) -> Maybe a -> E.Value
-maybe encoder =
-    Maybe.map encoder >> Maybe.withDefault E.null

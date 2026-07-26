@@ -48,7 +48,7 @@ init _ =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        WebSocketEvent Ws.Connected ->
+        WebSocketEvent (Ws.Connected _) ->
             ( model, Ws.send (Ws.Transmit "hello") )
 
         WebSocketEvent (Ws.Text value) ->
@@ -74,8 +74,8 @@ Each connection is identified by a string handle. Use the same handle to open, t
 openConnections : Cmd msg
 openConnections =
     Cmd.batch
-        [ Ws.sendWithHandle "chat" (Ws.Open chatUrl Nothing)
-        , Ws.sendWithHandle "alerts" (Ws.Open alertsUrl Nothing)
+        [ Ws.sendWithHandle "chat" (Ws.Open chatUrl [])
+        , Ws.sendWithHandle "alerts" (Ws.Open alertsUrl [])
         ]
 
 
@@ -115,12 +115,12 @@ type alias CloseRequest =
 
 
 type Cmd
-    = Open String (Maybe String)
+    = Open String (List String)
     | Transmit String
     | Close (Maybe CloseRequest)
 ```
 
-`Open` accepts a URL and optional subprotocol. `Transmit` emits `TransportError` if the socket is not open or the browser rejects the operation. Otherwise it emits no event; WebSocket provides no per-message delivery acknowledgement. `Close Nothing` preserves the browser's default close behavior; `Close (Just request)` sends its code and reason. Use an empty reason to send only a code. `open` and `close` are shortcuts for the default socket.
+`Open` accepts a URL and an ordered list of requested subprotocols. `Transmit` emits `TransportError` if the socket is not open or the browser rejects the operation. Otherwise it emits no event; WebSocket provides no per-message delivery acknowledgement. `Close Nothing` preserves the browser's default close behavior; `Close (Just request)` sends its code and reason. Use an empty reason to send only a code. `open` and `close` are shortcuts for the default socket.
 
 ### Events
 
@@ -150,13 +150,13 @@ type alias TransportErrorDetails =
 
 
 type RawMsg
-    = Connected
+    = Connected (Maybe String)
     | Disconnected CloseDetails
     | Text String
     | TransportError TransportErrorDetails
 ```
 
-`Connected` means the socket is ready to transmit. `Disconnected` includes the browser's close code, reason and `wasClean` flag, plus whether the close was initiated locally; it may occur even if the socket never connected. `Text` contains a text frame. `TransportError` identifies construction, send, close, browser, unsupported-data, and port-decoding failures. Use `errorKindToString` to render its kind alone or `errorToString` to render the kind and readable message.
+`Connected` means the socket is ready to transmit and contains the negotiated subprotocol, if any. `Disconnected` includes the browser's close code, reason and `wasClean` flag, plus whether the close was initiated locally; it may occur even if the socket never connected. `Text` contains a text frame. `TransportError` identifies construction, send, close, browser, unsupported-data, and port-decoding failures. Use `errorKindToString` to render its kind alone or `errorToString` to render the kind and readable message.
 
 ### JSON
 
@@ -184,7 +184,7 @@ subscriptions _ =
     Ws.subscribeMsg payloadDecoder WebSocketMessage
 ```
 
-The resulting messages are `Established`, `Closed`, `Received`, `TransportFailure`, or `PayloadDecodeFailure`. Payload decoding failures retain the original text and `Json.Decode.Error`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. Use `parseIncoming` when decoding a `RawMsg` explicitly.
+The resulting messages are `Established`, `Closed`, `Received`, `TransportFailure`, or `PayloadDecodeFailure`. `Established` contains the negotiated subprotocol, if any. Payload decoding failures retain the original text and `Json.Decode.Error`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. Use `parseIncoming` when decoding a `RawMsg` explicitly.
 
 ## Example
 

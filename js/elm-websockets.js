@@ -63,7 +63,9 @@ ElmWebsockets = (function() {
             }
 
             try {
-              var ws = new WebSocket(data.url, data.protocol || []);
+              var ws = data.protocols.length
+                ? new WebSocket(data.url, data.protocols)
+                : new WebSocket(data.url);
             } catch (error) {
               reportError(handle, "construction", error);
               break;
@@ -122,7 +124,7 @@ ElmWebsockets = (function() {
                 return;
               }
 
-              app.ports.wsMsg.send([handle, "connected", null]);
+              app.ports.wsMsg.send([handle, "connected", ws.protocol || null]);
             };
             break;
 

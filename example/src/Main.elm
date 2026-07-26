@@ -39,7 +39,7 @@ init : () -> ( Model, Cmd Message )
 init _ =
     let
         cmd =
-            Ws.Open "ws://127.0.0.1:8765" Nothing
+            Ws.Open "ws://127.0.0.1:8765" []
     in
     ( [ Sent cmd ], Ws.send cmd )
 
@@ -77,7 +77,7 @@ receiveSend event cmd model =
 update : Message -> Model -> ( Model, Cmd msg )
 update msg model =
     case msg of
-        WebsocketReceived (Ws.Connected as w) ->
+        WebsocketReceived ((Ws.Connected _) as w) ->
             receiveSend w (Ws.Transmit "Test message") model
 
         WebsocketReceived ((Ws.Text t) as w) ->
