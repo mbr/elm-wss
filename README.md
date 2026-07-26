@@ -3,16 +3,6 @@
 A small Elm 0.19 wrapper around the browser `WebSocket` API. It consists of an
 Elm port module and a readable JavaScript runtime.
 
-## How it works
-
-`WebsocketSimple.elm` sends commands through `wsCmd`. `elm-websockets.js`
-performs the browser operation and returns events through `wsMsg`.
-
-```text
-Elm command -> wsCmd -> JavaScript -> WebSocket
-Elm message <- wsMsg <- JavaScript <- browser event
-```
-
 ## Installation
 
 Because Elm packages containing `port` modules cannot be published, copy or
