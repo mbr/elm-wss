@@ -114,7 +114,7 @@ type Cmd
     | Close (Maybe Int) (Maybe String)
 ```
 
-`Open` accepts a URL and optional subprotocol. `Close` accepts an optional code and reason. `open` and `close` are shortcuts for the default socket.
+`Open` accepts a URL and optional subprotocol. `Transmit` emits `RawError` when the socket is not open. `Close` accepts an optional code and reason. `open` and `close` are shortcuts for the default socket.
 
 ### Events
 
@@ -159,7 +159,6 @@ The resulting messages are `Established`, `Closed`, `Received payload`, or `Erro
 ## Limitations
 
 - Only text frames are supported.
-- Sending is valid only after `Connected` and before `Disconnected`.
 - Reconnection, replay, authentication, and application protocols belong to the application.
 - Browser security rules still apply; in particular, HTTPS pages normally need `wss` endpoints.
 - Call `ElmWebsockets.initApp` once for each Elm application.
