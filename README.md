@@ -9,6 +9,8 @@ Because Elm packages containing `port` modules cannot be published, copy or link
 - `elm/WebsocketSimple.elm` into an Elm source directory
 - `js/elm-websockets.js` into your browser assets
 
+Using ports also makes the design slightly awkward: Elm does not allow custom `Cmd` implementations, so sending through a port cannot be tied directly to receiving the corresponding event.
+
 Load the runtime and your compiled Elm application, initialize Elm, then initialize the runtime:
 
 ```html
