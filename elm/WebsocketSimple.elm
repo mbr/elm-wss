@@ -28,6 +28,7 @@ port module WebsocketSimple exposing
     , TransportErrorDetails
     , TransportErrorKind(..)
     , close
+    , errorKindToString
     , errorToString
     , open
     , parseIncoming
@@ -97,8 +98,35 @@ type alias TransportErrorDetails =
 {-| Render a transport error as a readable string
 -}
 errorToString : TransportErrorDetails -> String
-errorToString =
-    .message
+errorToString error =
+    "[" ++ errorKindToString error.kind ++ "] " ++ error.message
+
+
+{-| Render a transport error kind as a readable string
+-}
+errorKindToString : TransportErrorKind -> String
+errorKindToString kind =
+    case kind of
+        ConstructionFailure ->
+            "ConstructionFailure"
+
+        SendFailure ->
+            "SendFailure"
+
+        CloseFailure ->
+            "CloseFailure"
+
+        BrowserFailure ->
+            "BrowserFailure"
+
+        SendRejection ->
+            "SendRejection"
+
+        UnsupportedData ->
+            "UnsupportedData"
+
+        PortDecodingFailure ->
+            "PortDecodingFailure"
 
 
 {-| Subscribe for incoming messages tagged with handler
