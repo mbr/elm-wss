@@ -98,9 +98,7 @@ ElmWebsockets = (function() {
                   app.ports.wsMsg.send([
                     handle,
                     "error",
-                    "Received non-string message of type " +
-                      typeof messageEvent.data +
-                      ", which cannot be handled"
+                    "received unsupported binary websocket message"
                   ]);
                   break;
               }

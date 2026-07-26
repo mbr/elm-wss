@@ -126,7 +126,7 @@ type RawMsg
     | RawError String
 ```
 
-`Connected` means the socket is ready to transmit. `Disconnected` means the current connection attempt closed, even if it never connected. `Text` contains a text frame. `RawError` reports a runtime or port error.
+`Connected` means the socket is ready to transmit. `Disconnected` means the current connection attempt closed, even if it never connected. `Text` contains a text frame. Binary messages are unsupported and produce `RawError`, as do runtime and port errors.
 
 ### JSON
 
@@ -155,13 +155,6 @@ subscriptions _ =
 ```
 
 The resulting messages are `Established`, `Closed`, `Received payload`, or `Error message`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. Use `parseIncoming` when decoding a `RawMsg` explicitly.
-
-## Limitations
-
-- Only text frames are supported.
-- Reconnection, replay, authentication, and application protocols belong to the application.
-- Browser security rules still apply; in particular, HTTPS pages normally need `wss` endpoints.
-- Call `ElmWebsockets.initApp` once for each Elm application.
 
 ## Example
 
