@@ -79,7 +79,7 @@ ElmWebsockets = (function() {
                 return;
               }
               debug(handle, "[onerror]", errorEvent);
-              app.ports.wsMsg.send([handle, "error", errorEvent.message]);
+              reportError(handle, "transport", errorEvent);
             };
             ws.onmessage = function(messageEvent) {
               if (app.webSockets.get(handle) !== ws) {
