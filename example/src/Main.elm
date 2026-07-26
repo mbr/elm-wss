@@ -35,11 +35,11 @@ type Message
 Will connect to an example echo websocket immediately
 
 -}
-init : () -> ( Model, Cmd Message )
-init _ =
+init : String -> ( Model, Cmd Message )
+init url =
     let
         cmd =
-            Ws.Open "ws://127.0.0.1:8765" []
+            Ws.Open url []
     in
     ( [ Sent cmd ], Ws.send cmd )
 
