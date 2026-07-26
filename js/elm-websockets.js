@@ -23,7 +23,7 @@ ElmWebsockets = (function() {
 
   pub.initApp = function(app, enableDebug) {
     if (app.ports && app.ports.wsCmd) {
-      app.webSockets = {};
+      app.webSockets = new Map();
 
       app.ports.wsCmd.subscribe(function(msg) {
         var debug = enableDebug ? console.log : function() {};
@@ -34,9 +34,9 @@ ElmWebsockets = (function() {
 
         switch (cmd) {
           case "open":
-            if (app.webSockets.hasOwnProperty(handle)) {
+            if (app.webSockets.has(handle)) {
               // Tear down existing handler.
-              var ws = app.webSockets[handle];
+              var ws = app.webSockets.get(handle);
               ws.onmessage = null;
               ws.onclose = null;
               ws.onerror = null;
@@ -83,7 +83,7 @@ ElmWebsockets = (function() {
             ws.onopen = function(event) {
               debug(handle, "[onopen]", event);
 
-              app.webSockets[handle] = ws;
+              app.webSockets.set(handle, ws);
               app.ports.wsMsg.send([handle, "connected", null]);
             };
             break;
@@ -91,8 +91,8 @@ ElmWebsockets = (function() {
           case "transmit":
             debug(handle, "[send]", data);
 
-            if (app.webSockets.hasOwnProperty(handle)) {
-              app.webSockets[handle].send(data);
+            if (app.webSockets.has(handle)) {
+              app.webSockets.get(handle).send(data);
             } else {
               app.ports.wsMsg.send([handle, "error", "cannot transmit on closed websocket"])
             }
@@ -101,11 +101,11 @@ ElmWebsockets = (function() {
             break;
 
           case "close":
-            debug(handle, "[close]", app.webSockets.hasOwnProperty(handle), data);
-            if (app.webSockets.hasOwnProperty(handle)) {
+            debug(handle, "[close]", app.webSockets.has(handle), data);
+            if (app.webSockets.has(handle)) {
               // TODO: Report an error on invalid codes.
-              app.webSockets[handle].close(data.code || 1000, data.reason || "");
-              delete app.webSockets[handle];
+              app.webSockets.get(handle).close(data.code || 1000, data.reason || "");
+              app.webSockets.delete(handle);
             }
             // If not openend, we simply ignore it.
             break;
