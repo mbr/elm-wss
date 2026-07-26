@@ -21,7 +21,8 @@
 
 
 port module WebsocketSimple exposing
-    ( Cmd(..)
+    ( CloseDetails
+    , Cmd(..)
     , Msg(..)
     , RawMsg(..)
     , close
@@ -58,6 +59,16 @@ type alias WebSocketHandle =
 -}
 type alias Url =
     String
+
+
+{-| Details supplied when a websocket closes
+-}
+type alias CloseDetails =
+    { code : Int
+    , reason : String
+    , wasClean : Bool
+    , initiatedLocally : Bool
+    }
 
 
 {-| Subscribe for incoming messages tagged with handler
@@ -139,14 +150,14 @@ type Cmd
 {-| Messages that are received from websockets
 
   - `Connected` when the connection succeeds
-  - `Disconnected` when the connection has been terminated
+  - `Disconnected` when the connection has been terminated, with close details
   - `Text` when a new text-message has arrived on the socket
   - `Err` on any kind of internal or external error
 
 -}
 type RawMsg
     = Connected
-    | Disconnected
+    | Disconnected CloseDetails
     | Text String
     | RawError String
 
@@ -159,7 +170,7 @@ above a `RawMsg` and will contain deserialization errors in its `Error`
 -}
 type Msg t
     = Established
-    | Closed
+    | Closed CloseDetails
     | Received t
     | Error String
 
@@ -172,8 +183,8 @@ parseIncoming decoder rawMsg =
         Connected ->
             Established
 
-        Disconnected ->
-            Closed
+        Disconnected details ->
+            Closed details
 
         RawError errMsg ->
             Error errMsg
@@ -222,6 +233,17 @@ decodeHelper decoder map value =
             (\e -> RawError ("decoding error in incoming channel message: " ++ D.errorToString e))
 
 
+{-| Decode websocket close details
+-}
+decodeCloseDetails : D.Decoder CloseDetails
+decodeCloseDetails =
+    D.map4 CloseDetails
+        (D.field "code" D.int)
+        (D.field "reason" D.string)
+        (D.field "wasClean" D.bool)
+        (D.field "initiatedLocally" D.bool)
+
+
 {-| Decode an incoming websocket message from javascript
 -}
 decodeWsMsg : ( WebSocketHandle, String, E.Value ) -> ( WebSocketHandle, RawMsg )
@@ -232,7 +254,7 @@ decodeWsMsg ( handle, kind, data ) =
             Connected
 
         "disconnected" ->
-            Disconnected
+            decodeHelper decodeCloseDetails Disconnected data
 
         "error" ->
             decodeHelper D.string RawError data

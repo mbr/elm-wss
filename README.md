@@ -54,7 +54,7 @@ update msg model =
         WebSocketEvent (Ws.Text value) ->
             ( value :: model, Ws.close )
 
-        WebSocketEvent Ws.Disconnected ->
+        WebSocketEvent (Ws.Disconnected _) ->
             ( model, Cmd.none )
 
         WebSocketEvent (Ws.RawError error) ->
@@ -119,14 +119,22 @@ type Cmd
 ### Events
 
 ```elm
+type alias CloseDetails =
+    { code : Int
+    , reason : String
+    , wasClean : Bool
+    , initiatedLocally : Bool
+    }
+
+
 type RawMsg
     = Connected
-    | Disconnected
+    | Disconnected CloseDetails
     | Text String
     | RawError String
 ```
 
-`Connected` means the socket is ready to transmit. `Disconnected` means the current connection attempt closed, even if it never connected. `Text` contains a text frame. Binary messages are unsupported and produce `RawError`, as do runtime and port errors.
+`Connected` means the socket is ready to transmit. `Disconnected` includes the browser's close code, reason and `wasClean` flag, plus whether the close was initiated locally; it may occur even if the socket never connected. `Text` contains a text frame. Binary messages are unsupported and produce `RawError`, as do runtime and port errors.
 
 ### JSON
 
@@ -154,7 +162,7 @@ subscriptions _ =
     Ws.subscribeMsg payloadDecoder WebSocketMessage
 ```
 
-The resulting messages are `Established`, `Closed`, `Received payload`, or `Error message`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. Use `parseIncoming` when decoding a `RawMsg` explicitly.
+The resulting messages are `Established`, `Closed details`, `Received payload`, or `Error message`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. Use `parseIncoming` when decoding a `RawMsg` explicitly.
 
 ## Example
 

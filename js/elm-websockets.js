@@ -46,9 +46,10 @@ ElmWebsockets = (function() {
           case "open":
             if (app.webSockets.has(handle)) {
               // Tear down existing handler.
-              var ws = app.webSockets.get(handle);
+              var entry = app.webSockets.get(handle);
               try {
-                ws.close();
+                entry.socket.close();
+                entry.initiatedLocally = true;
               } catch (error) {
                 reportError(handle, "close", error);
                 break;
@@ -61,28 +62,40 @@ ElmWebsockets = (function() {
               reportError(handle, "construction", error);
               break;
             }
-            app.webSockets.set(handle, ws);
+            var entry = {
+              initiatedLocally: false,
+              socket: ws
+            };
+            app.webSockets.set(handle, entry);
             if (debug) {
               debug(handle, "created new websocket", ws);
             }
             ws.onclose = function(closeEvent) {
-              if (app.webSockets.get(handle) !== ws) {
+              if (app.webSockets.get(handle) !== entry) {
                 return;
               }
               app.webSockets.delete(handle);
-              // TODO: code, reason, wasClean
               debug(handle, "[onclose]", closeEvent);
-              app.ports.wsMsg.send([handle, "disconnected", null]);
+              app.ports.wsMsg.send([
+                handle,
+                "disconnected",
+                {
+                  code: typeof closeEvent.code === "number" ? closeEvent.code : 1006,
+                  initiatedLocally: entry.initiatedLocally,
+                  reason: typeof closeEvent.reason === "string" ? closeEvent.reason : "",
+                  wasClean: Boolean(closeEvent.wasClean)
+                }
+              ]);
             };
             ws.onerror = function(errorEvent) {
-              if (app.webSockets.get(handle) !== ws) {
+              if (app.webSockets.get(handle) !== entry) {
                 return;
               }
               debug(handle, "[onerror]", errorEvent);
               reportError(handle, "transport", errorEvent);
             };
             ws.onmessage = function(messageEvent) {
-              if (app.webSockets.get(handle) !== ws) {
+              if (app.webSockets.get(handle) !== entry) {
                 return;
               }
               debug(handle, "[onmessage]", messageEvent);
@@ -105,7 +118,7 @@ ElmWebsockets = (function() {
             };
             ws.onopen = function(event) {
               if (
-                app.webSockets.get(handle) !== ws ||
+                app.webSockets.get(handle) !== entry ||
                 ws.readyState !== WebSocket.OPEN
               ) {
                 return;
@@ -119,10 +132,10 @@ ElmWebsockets = (function() {
           case "transmit":
             debug(handle, "[send]", data);
 
-            var ws = app.webSockets.get(handle);
-            if (ws && ws.readyState === WebSocket.OPEN) {
+            var entry = app.webSockets.get(handle);
+            if (entry && entry.socket.readyState === WebSocket.OPEN) {
               try {
-                ws.send(data);
+                entry.socket.send(data);
               } catch (error) {
                 reportError(handle, "send", error);
               }
@@ -136,8 +149,10 @@ ElmWebsockets = (function() {
           case "close":
             debug(handle, "[close]", app.webSockets.has(handle), data);
             if (app.webSockets.has(handle)) {
+              var entry = app.webSockets.get(handle);
               try {
-                app.webSockets.get(handle).close(data.code || 1000, data.reason || "");
+                entry.socket.close(data.code || 1000, data.reason || "");
+                entry.initiatedLocally = true;
               } catch (error) {
                 reportError(handle, "close", error);
               }
