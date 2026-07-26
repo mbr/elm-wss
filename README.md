@@ -68,32 +68,42 @@ subscriptions _ =
 
 ## Multiple connections
 
-Each connection is identified by a string handle. Use the same handle to open, transmit through, and close a connection:
+Each connection is identified by an opaque `Handle`, encoded as a string across the ports. Use the same handle to open, transmit through, and close a connection:
 
 ```elm
+chatHandle : Ws.Handle
+chatHandle =
+    Ws.handle "chat"
+
+
+alertsHandle : Ws.Handle
+alertsHandle =
+    Ws.handle "alerts"
+
+
 openConnections : Cmd msg
 openConnections =
     Cmd.batch
-        [ Ws.sendWithHandle "chat" (Ws.Open chatUrl [])
-        , Ws.sendWithHandle "alerts" (Ws.Open alertsUrl [])
+        [ Ws.sendWithHandle chatHandle (Ws.Open chatUrl [])
+        , Ws.sendWithHandle alertsHandle (Ws.Open alertsUrl [])
         ]
 
 
 sendChat : String -> Cmd msg
 sendChat message =
-    Ws.sendWithHandle "chat" (Ws.Transmit message)
+    Ws.sendWithHandle chatHandle (Ws.Transmit message)
 
 
 closeChat : Cmd msg
 closeChat =
-    Ws.sendWithHandle "chat" (Ws.Close Nothing)
+    Ws.sendWithHandle chatHandle (Ws.Close Nothing)
 ```
 
 Use `subscribeWithHandle` to receive the originating handle with each event:
 
 ```elm
 type Msg
-    = WebSocketEvent ( String, Ws.RawMsg )
+    = WebSocketEvent ( Ws.Handle, Ws.RawMsg )
 
 
 subscriptions : Model -> Sub Msg
@@ -101,7 +111,7 @@ subscriptions _ =
     Sub.map WebSocketEvent Ws.subscribeWithHandle
 ```
 
-`send` and `subscribe` use the implicit `"default"` handle. `subscribe` discards handle information.
+Use `handleToString` when the string representation is needed. `send` and `subscribe` use the implicit `"default"` handle. `subscribe` discards handle information.
 
 ## Reference
 
@@ -184,7 +194,7 @@ subscriptions _ =
     Ws.subscribeMsg payloadDecoder WebSocketMessage
 ```
 
-The resulting messages are `Established`, `Closed`, `Received`, `TransportFailure`, or `PayloadDecodeFailure`. `Established` contains the negotiated subprotocol, if any. Payload decoding failures retain the original text and `Json.Decode.Error`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. Use `parseIncoming` when decoding a `RawMsg` explicitly.
+The resulting messages are `Established`, `Closed`, `Received`, `TransportFailure`, or `PayloadDecodeFailure`. `Established` contains the negotiated subprotocol, if any. Payload decoding failures retain the original text and `Json.Decode.Error`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. The `subscribeMsgWithHandle` and `transmitMsgWithHandle` variants preserve the handle for multiple connections. Use `parseIncoming` when decoding a `RawMsg` explicitly.
 
 ## Example
 
