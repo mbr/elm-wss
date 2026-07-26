@@ -126,7 +126,7 @@ type RawMsg
     | RawError String
 ```
 
-`Connected` means the socket is ready to transmit. `Text` contains a text frame. `RawError` reports a runtime or port error.
+`Connected` means the socket is ready to transmit. `Disconnected` means the current connection attempt closed, even if it never connected. `Text` contains a text frame. `RawError` reports a runtime or port error.
 
 ### JSON
 

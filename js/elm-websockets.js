@@ -88,7 +88,10 @@ ElmWebsockets = (function() {
               }
             };
             ws.onopen = function(event) {
-              if (app.webSockets.get(handle) !== ws) {
+              if (
+                app.webSockets.get(handle) !== ws ||
+                ws.readyState !== WebSocket.OPEN
+              ) {
                 return;
               }
               debug(handle, "[onopen]", event);
