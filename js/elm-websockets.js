@@ -129,7 +129,7 @@ ElmWebsockets = (function() {
                 reportError(handle, "send", error);
               }
             } else {
-              app.ports.wsMsg.send([handle, "error", "cannot transmit on closed websocket"])
+              app.ports.wsMsg.send([handle, "error", "cannot transmit unless websocket is open"])
             }
 
 
