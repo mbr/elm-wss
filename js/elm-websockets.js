@@ -147,12 +147,11 @@ ElmWebsockets = (function() {
             break;
 
           default:
-            console.log("Received unknown command from elm:", cmd);
+            throw new Error("unknown websocket command: " + cmd);
         }
       });
     } else {
-      // This happens if the app is not using any ports.
-      console.log("websocket port is not defined in Elm app");
+      throw new Error("websocket port is not defined in Elm app");
     }
   };
 
