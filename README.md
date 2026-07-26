@@ -66,6 +66,45 @@ subscriptions _ =
     Sub.map WebSocketEvent Ws.subscribe
 ```
 
+## Multiple connections
+
+Each connection is identified by a string handle. Use the same handle to open, transmit through, and close a connection:
+
+```elm
+openConnections : Cmd msg
+openConnections =
+    Cmd.batch
+        [ Ws.sendWithHandle "chat" (Ws.Open chatUrl Nothing)
+        , Ws.sendWithHandle "alerts" (Ws.Open alertsUrl Nothing)
+        ]
+
+
+sendChat : String -> Cmd msg
+sendChat message =
+    Ws.sendWithHandle "chat" (Ws.Transmit message)
+
+
+closeChat : Cmd msg
+closeChat =
+    Ws.sendWithHandle "chat" (Ws.Close Nothing Nothing)
+```
+
+Use `subscribeWithHandle` to receive the originating handle with each event:
+
+```elm
+type Msg
+    = WebSocketEvent ( String, Ws.RawMsg )
+
+
+subscriptions : Model -> Sub Msg
+subscriptions _ =
+    Sub.map WebSocketEvent Ws.subscribeWithHandle
+```
+
+`send` and `subscribe` use the implicit `"default"` handle. `subscribe` discards handle information.
+
+## Reference
+
 ### Commands
 
 - `Open url protocol` opens a socket with an optional subprotocol.
@@ -80,10 +119,6 @@ subscriptions _ =
 - `Disconnected` means it closed.
 - `Text value` contains a text frame.
 - `RawError message` reports a runtime or port error.
-
-### Handles
-
-The convenience functions use the handle `"default"`. Use `sendWithHandle` and `subscribeWithHandle` for multiple sockets; incoming values then include the handle that produced them.
 
 ### JSON
 
