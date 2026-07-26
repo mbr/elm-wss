@@ -37,10 +37,6 @@ ElmWebsockets = (function() {
             if (app.webSockets.has(handle)) {
               // Tear down existing handler.
               var ws = app.webSockets.get(handle);
-              ws.onmessage = null;
-              ws.onclose = null;
-              ws.onerror = null;
-              ws.onopen = null;
               ws.close();
             }
 
@@ -52,15 +48,25 @@ ElmWebsockets = (function() {
               debug(handle, "created new websocket", ws);
             }
             ws.onclose = function(closeEvent) {
+              if (app.webSockets.get(handle) !== ws) {
+                return;
+              }
+              app.webSockets.delete(handle);
               // TODO: code, reason, wasClean
               debug(handle, "[onclose]", closeEvent);
               app.ports.wsMsg.send([handle, "disconnected", null]);
             };
             ws.onerror = function(errorEvent) {
+              if (app.webSockets.get(handle) !== ws) {
+                return;
+              }
               debug(handle, "[onerror]", errorEvent);
               app.ports.wsMsg.send([handle, "error", errorEvent.message]);
             };
             ws.onmessage = function(messageEvent) {
+              if (app.webSockets.get(handle) !== ws) {
+                return;
+              }
               debug(handle, "[onmessage]", messageEvent);
 
               // We need to differentiate different types of data here.
@@ -82,6 +88,9 @@ ElmWebsockets = (function() {
               }
             };
             ws.onopen = function(event) {
+              if (app.webSockets.get(handle) !== ws) {
+                return;
+              }
               debug(handle, "[onopen]", event);
 
               app.ports.wsMsg.send([handle, "connected", null]);
@@ -106,7 +115,6 @@ ElmWebsockets = (function() {
             if (app.webSockets.has(handle)) {
               // TODO: Report an error on invalid codes.
               app.webSockets.get(handle).close(data.code || 1000, data.reason || "");
-              app.webSockets.delete(handle);
             }
             // If not openend, we simply ignore it.
             break;
