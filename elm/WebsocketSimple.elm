@@ -25,7 +25,7 @@ port module WebsocketSimple exposing
     , Cmd(..)
     , Msg(..)
     , RawMsg(..)
-    , TransportError
+    , TransportErrorDetails
     , TransportErrorKind(..)
     , close
     , open
@@ -87,7 +87,7 @@ type TransportErrorKind
 
 {-| Describes a websocket transport error
 -}
-type alias TransportError =
+type alias TransportErrorDetails =
     { kind : TransportErrorKind
     , message : String
     }
@@ -174,14 +174,14 @@ type Cmd
   - `Connected` when the connection succeeds
   - `Disconnected` when the connection has been terminated, with close details
   - `Text` when a new text-message has arrived on the socket
-  - `RawError` on a transport or port error
+  - `TransportError` on a transport or port error
 
 -}
 type RawMsg
     = Connected
     | Disconnected CloseDetails
     | Text String
-    | RawError TransportError
+    | TransportError TransportErrorDetails
 
 
 {-| Typed messages received from websockets
@@ -194,7 +194,7 @@ type Msg t
     = Established
     | Closed CloseDetails
     | Received t
-    | TransportFailure TransportError
+    | TransportFailure TransportErrorDetails
     | PayloadDecodeFailure String D.Error
 
 
@@ -209,7 +209,7 @@ parseIncoming decoder rawMsg =
         Disconnected details ->
             Closed details
 
-        RawError error ->
+        TransportError error ->
             TransportFailure error
 
         Text txt ->
@@ -254,7 +254,7 @@ decodeHelper decoder map value =
         |> Result.map map
         |> extract
             (\error ->
-                RawError
+                TransportError
                     { kind = PortDecodingFailure
                     , message = "decoding error in incoming channel message: " ++ D.errorToString error
                     }
@@ -294,7 +294,7 @@ decodeTransportErrorKind =
 
 {-| Decode a transport error
 -}
-decodeTransportError : D.Decoder TransportError
+decodeTransportError : D.Decoder TransportErrorDetails
 decodeTransportError =
     D.map2
         (\kind message ->
@@ -330,13 +330,13 @@ decodeWsMsg ( handle, kind, data ) =
             decodeHelper decodeCloseDetails Disconnected data
 
         "error" ->
-            decodeHelper decodeTransportError RawError data
+            decodeHelper decodeTransportError TransportError data
 
         "message" ->
             decodeHelper D.string Text data
 
         _ ->
-            RawError
+            TransportError
                 { kind = PortDecodingFailure
                 , message = "received an invalid message through channel: " ++ kind
                 }

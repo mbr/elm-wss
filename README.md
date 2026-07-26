@@ -55,7 +55,7 @@ update msg model =
         WebSocketEvent (Ws.Disconnected _) ->
             ( model, Cmd.none )
 
-        WebSocketEvent (Ws.RawError error) ->
+        WebSocketEvent (Ws.TransportError error) ->
             ( error.message :: model, Cmd.none )
 
 
@@ -112,7 +112,7 @@ type Cmd
     | Close (Maybe Int) (Maybe String)
 ```
 
-`Open` accepts a URL and optional subprotocol. `Transmit` emits `RawError` if the socket is not open or the browser rejects the operation. Otherwise it emits no event; WebSocket provides no per-message delivery acknowledgement. `Close` accepts an optional code and reason. `open` and `close` are shortcuts for the default socket.
+`Open` accepts a URL and optional subprotocol. `Transmit` emits `TransportError` if the socket is not open or the browser rejects the operation. Otherwise it emits no event; WebSocket provides no per-message delivery acknowledgement. `Close` accepts an optional code and reason. `open` and `close` are shortcuts for the default socket.
 
 ### Events
 
@@ -135,7 +135,7 @@ type TransportErrorKind
     | PortDecodingFailure
 
 
-type alias TransportError =
+type alias TransportErrorDetails =
     { kind : TransportErrorKind
     , message : String
     }
@@ -145,10 +145,10 @@ type RawMsg
     = Connected
     | Disconnected CloseDetails
     | Text String
-    | RawError TransportError
+    | TransportError TransportErrorDetails
 ```
 
-`Connected` means the socket is ready to transmit. `Disconnected` includes the browser's close code, reason and `wasClean` flag, plus whether the close was initiated locally; it may occur even if the socket never connected. `Text` contains a text frame. `RawError` identifies construction, send, close, browser, unsupported-data, and port-decoding failures while retaining a readable message.
+`Connected` means the socket is ready to transmit. `Disconnected` includes the browser's close code, reason and `wasClean` flag, plus whether the close was initiated locally; it may occur even if the socket never connected. `Text` contains a text frame. `TransportError` identifies construction, send, close, browser, unsupported-data, and port-decoding failures while retaining a readable message.
 
 ### JSON
 
