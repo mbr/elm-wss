@@ -162,7 +162,7 @@ subscriptions _ =
     Ws.subscribeMsg payloadDecoder WebSocketMessage
 ```
 
-The resulting messages are `Established`, `Closed details`, `Received payload`, or `Error message`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. Use `parseIncoming` when decoding a `RawMsg` explicitly.
+The resulting messages are `Established`, `Closed`, `Received`, or `Error`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. Use `parseIncoming` when decoding a `RawMsg` explicitly.
 
 ## Example
 
