@@ -25,6 +25,16 @@ ElmWebsockets = (function() {
     if (app.ports && app.ports.wsCmd) {
       app.webSockets = new Map();
 
+      function reportError(handle, operation, error) {
+        var message = "websocket " + operation + " failed";
+        if (error && typeof error.message === "string" && error.message) {
+          message += ": " + error.message;
+        } else if (typeof error === "string" && error) {
+          message += ": " + error;
+        }
+        app.ports.wsMsg.send([handle, "error", message]);
+      }
+
       app.ports.wsCmd.subscribe(function(msg) {
         var debug = enableDebug ? console.log : function() {};
 
@@ -37,12 +47,20 @@ ElmWebsockets = (function() {
             if (app.webSockets.has(handle)) {
               // Tear down existing handler.
               var ws = app.webSockets.get(handle);
-              ws.close();
+              try {
+                ws.close();
+              } catch (error) {
+                reportError(handle, "close", error);
+                break;
+              }
             }
 
-            // TODO: Catch illegal string error.
-            // TODO: Catch security exception error.
-            var ws = new WebSocket(data.url, data.protocol || []);
+            try {
+              var ws = new WebSocket(data.url, data.protocol || []);
+            } catch (error) {
+              reportError(handle, "construction", error);
+              break;
+            }
             app.webSockets.set(handle, ws);
             if (debug) {
               debug(handle, "created new websocket", ws);
@@ -105,7 +123,11 @@ ElmWebsockets = (function() {
 
             var ws = app.webSockets.get(handle);
             if (ws && ws.readyState === WebSocket.OPEN) {
-              ws.send(data);
+              try {
+                ws.send(data);
+              } catch (error) {
+                reportError(handle, "send", error);
+              }
             } else {
               app.ports.wsMsg.send([handle, "error", "cannot transmit on closed websocket"])
             }
@@ -116,8 +138,11 @@ ElmWebsockets = (function() {
           case "close":
             debug(handle, "[close]", app.webSockets.has(handle), data);
             if (app.webSockets.has(handle)) {
-              // TODO: Report an error on invalid codes.
-              app.webSockets.get(handle).close(data.code || 1000, data.reason || "");
+              try {
+                app.webSockets.get(handle).close(data.code || 1000, data.reason || "");
+              } catch (error) {
+                reportError(handle, "close", error);
+              }
             }
             // If not openend, we simply ignore it.
             break;
