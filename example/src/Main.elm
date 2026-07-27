@@ -5,6 +5,7 @@ module Main exposing (..)
 
 import Browser
 import Html exposing (Html, div, text)
+import WebsocketPorts as Ports
 import WebsocketSimple as Ws
 
 
@@ -41,7 +42,7 @@ init url =
         cmd =
             Ws.Open url []
     in
-    ( [ Sent cmd ], Ws.send cmd )
+    ( [ Sent cmd ], Ws.send Ports.wsCmd cmd )
 
 
 {-| Render event log as HTML
@@ -69,7 +70,7 @@ viewEvent event =
 -}
 receiveSend : Ws.RawMsg -> Ws.Cmd -> Model -> ( Model, Cmd msg )
 receiveSend event cmd model =
-    ( model ++ [ WebsocketEvent event, Sent cmd ], Ws.send cmd )
+    ( model ++ [ WebsocketEvent event, Sent cmd ], Ws.send Ports.wsCmd cmd )
 
 
 {-| Core update function
@@ -91,7 +92,7 @@ update msg model =
 -}
 subscriptions : Model -> Sub Message
 subscriptions _ =
-    Sub.map WebsocketReceived <| Ws.subscribe
+    Sub.map WebsocketReceived <| Ws.subscribe Ports.wsMsg
 
 
 {-| Main entry point
