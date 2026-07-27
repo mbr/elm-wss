@@ -28,9 +28,7 @@ module WebsocketSimple exposing
     , Msg(..), subscribeMsg, subscribeMsgWithHandle, transmitMsg, transmitMsgWithHandle, parseIncoming
     )
 
-{-| A small WebSocket client backed by a compact JavaScript runtime.
-
-Subscribe before opening a socket and wait for `Connected` before transmitting. Accepted transmissions emit no event because the browser provides no per-message delivery acknowledgement.
+{-| A small, typed WebSocket client for Elm with a compact, auditable JavaScript runtime. It supports multiple connections, lifecycle events, and text or JSON messages.
 
 
 # Installation
@@ -75,6 +73,8 @@ Pass the application-owned ports described by these aliases to commands and subs
 
 
 # Basic usage
+
+Subscribe to events before opening a connection, and wait for `Connected` before transmitting.
 
     import WebsocketPorts as Ports
     import WebsocketSimple as WebSocket
