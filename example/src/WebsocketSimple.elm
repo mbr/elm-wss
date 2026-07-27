@@ -1,1 +1,1 @@
-../../elm/WebsocketSimple.elm
+../../src/WebsocketSimple.elm
