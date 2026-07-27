@@ -11,9 +11,10 @@
 <script src="app.js"></script>
 <script>
 var app = Elm.Main.init({
+  flags: new URLSearchParams(window.location.search).get("url") || "ws://127.0.0.1:8765",
   node: document.getElementById('elm')
 });
-ElmWebsockets.initApp(app, true);
+ElmWebsockets.initApp(app);
 </script>
 </body>
 </html>

@@ -21,102 +21,153 @@
 ElmWebsockets = (function() {
   var pub = {};
 
-  pub.initApp = function(app, enableDebug) {
+  pub.initApp = function(app) {
     if (app.ports && app.ports.wsCmd) {
-      app.webSockets = {};
+      app.webSockets = new Map();
+
+      function emitError(handle, kind, message) {
+        app.ports.wsMsg.send([
+          handle,
+          "error",
+          { kind: kind, message: message }
+        ]);
+      }
+
+      function reportError(handle, operation, error) {
+        var message = "websocket " + operation + " failed";
+        if (error && typeof error.message === "string" && error.message) {
+          message += ": " + error.message;
+        } else if (typeof error === "string" && error) {
+          message += ": " + error;
+        }
+        emitError(handle, operation, message);
+      }
 
       app.ports.wsCmd.subscribe(function(msg) {
-        var debug = enableDebug ? console.log : function() {};
-
         var handle = msg[0];
         var cmd = msg[1];
         var data = msg[2];
 
         switch (cmd) {
           case "open":
-            if (app.webSockets.hasOwnProperty(handle)) {
+            if (app.webSockets.has(handle)) {
               // Tear down existing handler.
-              var ws = app.webSockets[handle];
-              ws.onmessage = null;
-              ws.onclose = null;
-              ws.onerror = null;
-              ws.onopen = null;
-              ws.close();
+              var entry = app.webSockets.get(handle);
+              try {
+                entry.socket.close();
+                entry.initiatedLocally = true;
+              } catch (error) {
+                reportError(handle, "close", error);
+                break;
+              }
             }
 
-            // TODO: Catch illegal string error.
-            // TODO: Catch security exception error.
-            var ws = new WebSocket(data.url, data.protocol || []);
-            if (debug) {
-              debug(handle, "created new websocket", ws);
+            try {
+              var ws = data.protocols.length
+                ? new WebSocket(data.url, data.protocols)
+                : new WebSocket(data.url);
+            } catch (error) {
+              reportError(handle, "construction", error);
+              break;
             }
+            var entry = {
+              initiatedLocally: false,
+              socket: ws
+            };
+            app.webSockets.set(handle, entry);
             ws.onclose = function(closeEvent) {
-              // TODO: code, reason, wasClean
-              debug(handle, "[onclose]", closeEvent);
-              app.ports.wsMsg.send([handle, "disconnected", null]);
+              if (app.webSockets.get(handle) !== entry) {
+                return;
+              }
+              app.webSockets.delete(handle);
+              app.ports.wsMsg.send([
+                handle,
+                "disconnected",
+                {
+                  code: typeof closeEvent.code === "number" ? closeEvent.code : 1006,
+                  initiatedLocally: entry.initiatedLocally,
+                  reason: typeof closeEvent.reason === "string" ? closeEvent.reason : "",
+                  wasClean: Boolean(closeEvent.wasClean)
+                }
+              ]);
             };
             ws.onerror = function(errorEvent) {
-              debug(handle, "[onerror]", errorEvent);
-              app.ports.wsMsg.send([handle, "error", errorEvent.message]);
+              if (app.webSockets.get(handle) !== entry) {
+                return;
+              }
+              reportError(handle, "transport", errorEvent);
             };
             ws.onmessage = function(messageEvent) {
-              debug(handle, "[onmessage]", messageEvent);
+              if (app.webSockets.get(handle) !== entry) {
+                return;
+              }
 
               // We need to differentiate different types of data here.
-              // TODO: origin, lastEventId, source, ports?
-              // console.log("INCOMING", messageEvent);
               switch (typeof messageEvent.data) {
                 case "string":
                   app.ports.wsMsg.send([handle, "message", messageEvent.data]);
                   break;
                 default:
-                  app.ports.wsMsg.send([
+                  emitError(
                     handle,
-                    "error",
-                    "Received non-string message of type " +
-                      typeof messageEvent.data +
-                      ", which cannot be handled"
-                  ]);
+                    "unsupported-data",
+                    "received unsupported binary websocket message"
+                  );
                   break;
               }
             };
-            ws.onopen = function(event) {
-              debug(handle, "[onopen]", event);
+            ws.onopen = function() {
+              if (
+                app.webSockets.get(handle) !== entry ||
+                ws.readyState !== WebSocket.OPEN
+              ) {
+                return;
+              }
 
-              app.webSockets[handle] = ws;
-              app.ports.wsMsg.send([handle, "connected", null]);
+              app.ports.wsMsg.send([handle, "connected", ws.protocol || null]);
             };
             break;
 
           case "transmit":
-            debug(handle, "[send]", data);
-
-            if (app.webSockets.hasOwnProperty(handle)) {
-              app.webSockets[handle].send(data);
+            var entry = app.webSockets.get(handle);
+            if (entry && entry.socket.readyState === WebSocket.OPEN) {
+              try {
+                entry.socket.send(data);
+              } catch (error) {
+                reportError(handle, "send", error);
+              }
             } else {
-              app.ports.wsMsg.send([handle, "error", "cannot transmit on closed websocket"])
+              emitError(
+                handle,
+                "send-rejection",
+                "cannot transmit unless websocket is open"
+              );
             }
-
-
             break;
 
           case "close":
-            debug(handle, "[close]", app.webSockets.hasOwnProperty(handle), data);
-            if (app.webSockets.hasOwnProperty(handle)) {
-              // TODO: Report an error on invalid codes.
-              app.webSockets[handle].close(data.code || 1000, data.reason || "");
-              delete app.webSockets[handle];
+            if (app.webSockets.has(handle)) {
+              var entry = app.webSockets.get(handle);
+              try {
+                if (data.code === null) {
+                  entry.socket.close();
+                } else {
+                  entry.socket.close(data.code, data.reason);
+                }
+                entry.initiatedLocally = true;
+              } catch (error) {
+                reportError(handle, "close", error);
+              }
             }
-            // If not openend, we simply ignore it.
+            // Closing an absent socket is a no-op.
             break;
 
           default:
-            console.log("Received unknown command from elm:", cmd);
+            throw new Error("unknown websocket command: " + cmd);
         }
       });
     } else {
-      // This happens if the app is not using any ports.
-      console.log("websocket port is not defined in Elm app");
+      throw new Error("websocket port is not defined in Elm app");
     }
   };
 

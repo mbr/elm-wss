@@ -21,18 +21,29 @@
 
 
 port module WebsocketSimple exposing
-    ( Cmd(..)
+    ( CloseDetails
+    , CloseRequest
+    , Cmd(..)
+    , Handle
     , Msg(..)
     , RawMsg(..)
+    , TransportErrorDetails
+    , TransportErrorKind(..)
     , close
+    , errorKindToString
+    , errorToString
+    , handle
+    , handleToString
     , open
     , parseIncoming
     , send
     , sendWithHandle
     , subscribe
     , subscribeMsg
+    , subscribeMsgWithHandle
     , subscribeWithHandle
     , transmitMsg
+    , transmitMsgWithHandle
     )
 
 {-| The simple websockets module.
@@ -48,10 +59,24 @@ import Json.Encode as E
 import Platform.Cmd
 
 
-{-| A handle identifies a particular websocket
+{-| Identifies a particular websocket
 -}
-type alias WebSocketHandle =
-    String
+type Handle
+    = Handle String
+
+
+{-| Construct a websocket handle
+-}
+handle : String -> Handle
+handle =
+    Handle
+
+
+{-| Return a websocket handle's string representation
+-}
+handleToString : Handle -> String
+handleToString (Handle value) =
+    value
 
 
 {-| Websocket URL to connect to (`ws://..` or `ws:///...`)
@@ -60,17 +85,89 @@ type alias Url =
     String
 
 
-{-| Subscribe for incoming messages tagged with handler
+{-| Details supplied when a websocket closes
+-}
+type alias CloseDetails =
+    { code : Int
+    , reason : String
+    , wasClean : Bool
+    , initiatedLocally : Bool
+    }
 
-Yields tuples of `(handler, msg)`
+
+{-| Describes an application-requested close
+-}
+type alias CloseRequest =
+    { code : Int
+    , reason : String
+    }
+
+
+{-| Categorizes a websocket transport error
+-}
+type TransportErrorKind
+    = ConstructionFailure
+    | SendFailure
+    | CloseFailure
+    | BrowserFailure
+    | SendRejection
+    | UnsupportedData
+    | PortDecodingFailure
+
+
+{-| Describes a websocket transport error
+-}
+type alias TransportErrorDetails =
+    { kind : TransportErrorKind
+    , message : String
+    }
+
+
+{-| Render a transport error as a readable string
+-}
+errorToString : TransportErrorDetails -> String
+errorToString error =
+    "[" ++ errorKindToString error.kind ++ "] " ++ error.message
+
+
+{-| Render a transport error kind as a readable string
+-}
+errorKindToString : TransportErrorKind -> String
+errorKindToString kind =
+    case kind of
+        ConstructionFailure ->
+            "ConstructionFailure"
+
+        SendFailure ->
+            "SendFailure"
+
+        CloseFailure ->
+            "CloseFailure"
+
+        BrowserFailure ->
+            "BrowserFailure"
+
+        SendRejection ->
+            "SendRejection"
+
+        UnsupportedData ->
+            "UnsupportedData"
+
+        PortDecodingFailure ->
+            "PortDecodingFailure"
+
+
+{-| Subscribe for incoming messages tagged with their handle
+
+Yields tuples of `(handle, msg)`
 
 -}
-subscribeWithHandle : Sub ( WebSocketHandle, RawMsg )
+subscribeWithHandle : Sub ( Handle, RawMsg )
 subscribeWithHandle =
     wsMsg decodeWsMsg
 
 
-{-| Subscribe for incoming messages, discarding handler information
+{-| Subscribe for incoming messages, discarding handle information
 -}
 subscribe : Sub RawMsg
 subscribe =
@@ -84,84 +181,103 @@ subscribeMsg dec wrap =
     Sub.map (parseIncoming dec >> wrap) subscribe
 
 
+{-| Subscribe and parse JSON of incoming messages, preserving handle info
+-}
+subscribeMsgWithHandle : D.Decoder t -> (( Handle, Msg t ) -> msg) -> Sub msg
+subscribeMsgWithHandle dec wrap =
+    Sub.map
+        (\( socketHandle, rawMsg ) ->
+            wrap ( socketHandle, parseIncoming dec rawMsg )
+        )
+        subscribeWithHandle
+
+
 {-| Send a message to a websocket specified by handle
 -}
-sendWithHandle : WebSocketHandle -> Cmd -> Platform.Cmd.Cmd msg
-sendWithHandle handle cmd =
+sendWithHandle : Handle -> Cmd -> Platform.Cmd.Cmd msg
+sendWithHandle (Handle socketHandle) cmd =
     let
         ( cmdString, data ) =
             encodeWsCmd cmd
     in
-    wsCmd ( handle, cmdString, data )
+    wsCmd ( socketHandle, cmdString, data )
 
 
 {-| Send a command to `default` socket
 -}
 send : Cmd -> Platform.Cmd.Cmd msg
 send =
-    sendWithHandle "default"
+    sendWithHandle (Handle "default")
 
 
 {-| Connect to a specified socket as default
 -}
 open : String -> Platform.Cmd.Cmd msg
 open url =
-    send <| Open url Nothing
+    send <| Open url []
 
 
 {-| Close the default connection
 -}
 close : Platform.Cmd.Cmd msg
 close =
-    send <| Close Nothing Nothing
+    send <| Close Nothing
 
 
 {-| JSON-encode a message and send it to the `default` socket
 -}
 transmitMsg : (t -> E.Value) -> t -> Platform.Cmd.Cmd msg
-transmitMsg enc msg =
-    enc msg |> E.encode 0 |> Transmit |> send
+transmitMsg =
+    transmitMsgWithHandle (Handle "default")
+
+
+{-| JSON-encode a message and send it to a socket specified by handle
+-}
+transmitMsgWithHandle : Handle -> (t -> E.Value) -> t -> Platform.Cmd.Cmd msg
+transmitMsgWithHandle socketHandle enc msg =
+    enc msg |> E.encode 0 |> Transmit |> sendWithHandle socketHandle
 
 
 {-| Command that can be sent to a websocket:
 
-  - `Open` opens a connection to the specified URL, with an optional protocol
+  - `Open` opens a connection to the specified URL with ordered subprotocols
   - `Transmit` sends a text message string
-  - `Close` closes the connection, with an optional code and reason
+  - `Close` closes the connection with optional close details
 
 -}
 type Cmd
-    = Open Url (Maybe String)
+    = Open Url (List String)
     | Transmit String
-    | Close (Maybe Int) (Maybe String)
+    | Close (Maybe CloseRequest)
 
 
 {-| Messages that are received from websockets
 
-  - `Connected` when the connection succeeds
-  - `Disconnected` when the connection has been terminated
+  - `Connected` when the connection succeeds, with the negotiated subprotocol
+  - `Disconnected` when the connection has been terminated, with close details
   - `Text` when a new text-message has arrived on the socket
-  - `Err` on any kind of internal or external error
+  - `TransportError` on a transport or port error
 
 -}
 type RawMsg
-    = Connected
-    | Disconnected
+    = Connected (Maybe String)
+    | Disconnected CloseDetails
     | Text String
-    | RawError String
+    | TransportError TransportErrorDetails
 
 
 {-| Typed messages received from websockets
 
-When receiving JSON-encoded messages via websockets, this type is one layer
-above a `RawMsg` and will contain deserialization errors in its `Error`
+When receiving JSON-encoded messages via websockets, this type keeps transport
+errors separate from payload decoding failures.
 
 -}
 type Msg t
-    = Established
-    | Closed
+    = Established (Maybe String)
+    | Closed CloseDetails
     | Received t
-    | Error String
+    | TransportFailure TransportErrorDetails
+    | PayloadDecodeFailure String D.Error
 
 
 {-| Convert a `RawMsg` into a `Msg`
@@ -169,22 +285,22 @@ type Msg t
 parseIncoming : D.Decoder t -> RawMsg -> Msg t
 parseIncoming decoder rawMsg =
     case rawMsg of
-        Connected ->
-            Established
+        Connected protocol ->
+            Established protocol
 
-        Disconnected ->
-            Closed
+        Disconnected details ->
+            Closed details
 
-        RawError errMsg ->
-            Error errMsg
+        TransportError error ->
+            TransportFailure error
 
         Text txt ->
             case D.decodeString decoder txt of
                 Ok v ->
                     Received v
 
-                Err e ->
-                    Error (D.errorToString e ++ "JSON decoding failed: ")
+                Err error ->
+                    PayloadDecodeFailure txt error
 
 
 {-| Helper function to encode a command to be sent over the channel
@@ -192,22 +308,31 @@ parseIncoming decoder rawMsg =
 encodeWsCmd : Cmd -> ( String, E.Value )
 encodeWsCmd cmd =
     case cmd of
-        Open url protocol ->
+        Open url protocols ->
             ( "open"
             , E.object
                 [ ( "url", E.string url )
-                , ( "protocol", maybe E.string protocol )
+                , ( "protocols", E.list E.string protocols )
                 ]
             )
 
         Transmit data ->
             ( "transmit", E.string data )
 
-        Close code reason ->
+        Close closeRequest ->
+            let
+                ( code, reason ) =
+                    case closeRequest of
+                        Just request ->
+                            ( E.int request.code, E.string request.reason )
+
+                        Nothing ->
+                            ( E.null, E.null )
+            in
             ( "close"
             , E.object
-                [ ( "code", maybe E.int code )
-                , ( "reason", maybe E.string reason )
+                [ ( "code", code )
+                , ( "reason", reason )
                 ]
             )
 
@@ -219,29 +344,93 @@ decodeHelper decoder map value =
     D.decodeValue decoder value
         |> Result.map map
         |> extract
-            (\e -> RawError ("decoding error in incoming channel message: " ++ D.errorToString e))
+            (\error ->
+                TransportError
+                    { kind = PortDecodingFailure
+                    , message = "decoding error in incoming channel message: " ++ D.errorToString error
+                    }
+            )
+
+
+{-| Decode a transport error kind
+-}
+decodeTransportErrorKind : D.Decoder TransportErrorKind
+decodeTransportErrorKind =
+    D.string
+        |> D.andThen
+            (\kind ->
+                case kind of
+                    "construction" ->
+                        D.succeed ConstructionFailure
+
+                    "send" ->
+                        D.succeed SendFailure
+
+                    "close" ->
+                        D.succeed CloseFailure
+
+                    "transport" ->
+                        D.succeed BrowserFailure
+
+                    "send-rejection" ->
+                        D.succeed SendRejection
+
+                    "unsupported-data" ->
+                        D.succeed UnsupportedData
+
+                    _ ->
+                        D.fail ("unknown transport error kind: " ++ kind)
+            )
+
+
+{-| Decode a transport error
+-}
+decodeTransportError : D.Decoder TransportErrorDetails
+decodeTransportError =
+    D.map2
+        (\kind message ->
+            { kind = kind
+            , message = message
+            }
+        )
+        (D.field "kind" decodeTransportErrorKind)
+        (D.field "message" D.string)
+
+
+{-| Decode websocket close details
+-}
+decodeCloseDetails : D.Decoder CloseDetails
+decodeCloseDetails =
+    D.map4 CloseDetails
+        (D.field "code" D.int)
+        (D.field "reason" D.string)
+        (D.field "wasClean" D.bool)
+        (D.field "initiatedLocally" D.bool)
 
 
 {-| Decode an incoming websocket message from javascript
 -}
-decodeWsMsg : ( WebSocketHandle, String, E.Value ) -> ( WebSocketHandle, RawMsg )
-decodeWsMsg ( handle, kind, data ) =
-    ( handle
+decodeWsMsg : ( String, String, E.Value ) -> ( Handle, RawMsg )
+decodeWsMsg ( handleValue, kind, data ) =
+    ( Handle handleValue
     , case kind of
         "connected" ->
-            Connected
+            decodeHelper (D.nullable D.string) Connected data
 
         "disconnected" ->
-            Disconnected
+            decodeHelper decodeCloseDetails Disconnected data
 
         "error" ->
-            decodeHelper D.string RawError data
+            decodeHelper decodeTransportError TransportError data
 
         "message" ->
             decodeHelper D.string Text data
 
         _ ->
-            RawError ("Received an invalid message through channel: " ++ kind)
+            TransportError
+                { kind = PortDecodingFailure
+                , message = "received an invalid message through channel: " ++ kind
+                }
     )
 
 
@@ -250,12 +439,12 @@ decodeWsMsg ( handle, kind, data ) =
 Data is sent out as `(handle, command, data)`.
 
 -}
-port wsCmd : ( WebSocketHandle, String, E.Value ) -> Platform.Cmd.Cmd msg
+port wsCmd : ( String, String, E.Value ) -> Platform.Cmd.Cmd msg
 
 
 {-| Websocket incoming port.
 -}
-port wsMsg : (( WebSocketHandle, String, E.Value ) -> msg) -> Sub msg
+port wsMsg : (( String, String, E.Value ) -> msg) -> Sub msg
 
 
 
@@ -296,38 +485,3 @@ extract f x =
 
         Err e ->
             f e
-
-
-
--- from `Json.Encode.Extra`
-{- Json.Encode.Extra is licensed using the MIT License
-   The MIT License (MIT)
-
-   Copyright (c) 2016 CircuitHub Inc., Elm Community members
-
-   Permission is hereby granted, free of charge, to any person obtaining a copy
-   of this software and associated documentation files (the "Software"), to deal
-   in the Software without restriction, including without limitation the rights
-   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-   copies of the Software, and to permit persons to whom the Software is
-   furnished to do so, subject to the following conditions:
-
-   The above copyright notice and this permission notice shall be included in all
-   copies or substantial portions of the Software.
-
-   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-   SOFTWARE.
-
-
-
--}
-
-
-maybe : (a -> E.Value) -> Maybe a -> E.Value
-maybe encoder =
-    Maybe.map encoder >> Maybe.withDefault E.null

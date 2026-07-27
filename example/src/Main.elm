@@ -35,11 +35,11 @@ type Message
 Will connect to an example echo websocket immediately
 
 -}
-init : () -> ( Model, Cmd Message )
-init _ =
+init : String -> ( Model, Cmd Message )
+init url =
     let
         cmd =
-            Ws.Open "wss://echo.websocket.org/" Nothing
+            Ws.Open url []
     in
     ( [ Sent cmd ], Ws.send cmd )
 
@@ -77,11 +77,11 @@ receiveSend event cmd model =
 update : Message -> Model -> ( Model, Cmd msg )
 update msg model =
     case msg of
-        WebsocketReceived (Ws.Connected as w) ->
+        WebsocketReceived ((Ws.Connected _) as w) ->
             receiveSend w (Ws.Transmit "Test message") model
 
         WebsocketReceived ((Ws.Text t) as w) ->
-            receiveSend w (Ws.Close Nothing Nothing) model
+            receiveSend w (Ws.Close Nothing) model
 
         WebsocketReceived w ->
             ( model ++ [ WebsocketEvent w ], Cmd.none )
