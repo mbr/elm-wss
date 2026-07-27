@@ -33,9 +33,43 @@ module WebsocketSimple exposing
 Subscribe before opening a socket and wait for `Connected` before transmitting. Accepted transmissions emit no event because the browser provides no per-message delivery acknowledgement.
 
 
+# Installation
+
+Install the Elm package:
+
+```sh
+elm install mbr/elm-wss
+```
+
+Elm packages cannot declare ports, so copy [`ports/WebsocketPorts.elm`](https://github.com/mbr/elm-wss/blob/1.0.0/ports/WebsocketPorts.elm) into an application source directory. It contains the application-owned port declarations:
+
+    port module WebsocketPorts exposing (wsCmd, wsMsg)
+
+    import WebsocketSimple exposing (CommandPort, EventPort)
+
+    port wsCmd : CommandPort msg
+
+    port wsMsg : EventPort msg
+
+Copy [`js/elm-websockets.js`](https://github.com/mbr/elm-wss/blob/1.0.0/js/elm-websockets.js) into the browser assets. Load the runtime and compiled Elm application, initialize Elm, and then initialize the runtime:
+
+```html
+<script src="elm-websockets.js"></script>
+<script src="app.js"></script>
+<script>
+var app = Elm.Main.init({
+  node: document.getElementById("elm")
+});
+ElmWebsockets.initApp(app);
+</script>
+```
+
+The JavaScript initialization is a no-op when the application does not contain the command port, so it can remain in the bootstrap while WebSocket code is temporarily unused.
+
+
 # Ports
 
-Applications declare the two ports described by these aliases and pass them to commands and subscriptions.
+Pass the application-owned ports described by these aliases to commands and subscriptions.
 
 @docs CommandPort, EventPort
 
