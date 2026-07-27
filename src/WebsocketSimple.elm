@@ -171,11 +171,6 @@ Regular subscriptions expose incoming text frames as `Text String`. Typed subscr
 
 @docs Msg, subscribeMsg, subscribeMsgWithHandle, transmitMsg, transmitMsgWithHandle, parseIncoming
 
-
-# Example
-
-Start a local echo server with `websocat -E --text ws-l:127.0.0.1:8765 mirror:`, run `./build.sh` from `example/`, and open `index.html`. The endpoint can be overridden with a query parameter such as `index.html?url=ws://127.0.0.1:9000`.
-
 -}
 
 import Json.Decode as D
