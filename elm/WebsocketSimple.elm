@@ -20,7 +20,7 @@
 -}
 
 
-port module WebsocketSimple exposing
+module WebsocketSimple exposing
     ( CloseDetails
     , CloseRequest
     , Cmd(..)
@@ -176,80 +176,83 @@ errorKindToString kind =
 Yields tuples of `(handle, msg)`
 
 -}
-subscribeWithHandle : Sub ( Handle, RawMsg )
-subscribeWithHandle =
-    wsMsg decodeWsMsg
+subscribeWithHandle : EventPort ( Handle, RawMsg ) -> Sub ( Handle, RawMsg )
+subscribeWithHandle eventPort =
+    eventPort decodeWsMsg
 
 
 {-| Subscribe for incoming messages, discarding handle information
 -}
-subscribe : Sub RawMsg
-subscribe =
-    Sub.map Tuple.second subscribeWithHandle
+subscribe : EventPort RawMsg -> Sub RawMsg
+subscribe eventPort =
+    eventPort (decodeWsMsg >> Tuple.second)
 
 
 {-| Subscribe and parse JSON of incoming messages, discarding handle information
 -}
-subscribeMsg : D.Decoder t -> (Msg t -> msg) -> Sub msg
-subscribeMsg dec wrap =
-    Sub.map (parseIncoming dec >> wrap) subscribe
+subscribeMsg : EventPort msg -> D.Decoder t -> (Msg t -> msg) -> Sub msg
+subscribeMsg eventPort dec wrap =
+    eventPort (decodeWsMsg >> Tuple.second >> parseIncoming dec >> wrap)
 
 
 {-| Subscribe and parse JSON of incoming messages, preserving handle info
 -}
-subscribeMsgWithHandle : D.Decoder t -> (( Handle, Msg t ) -> msg) -> Sub msg
-subscribeMsgWithHandle dec wrap =
-    Sub.map
-        (\( socketHandle, rawMsg ) ->
+subscribeMsgWithHandle : EventPort msg -> D.Decoder t -> (( Handle, Msg t ) -> msg) -> Sub msg
+subscribeMsgWithHandle eventPort dec wrap =
+    eventPort
+        (\value ->
+            let
+                ( socketHandle, rawMsg ) =
+                    decodeWsMsg value
+            in
             wrap ( socketHandle, parseIncoming dec rawMsg )
         )
-        subscribeWithHandle
 
 
 {-| Send a message to a websocket specified by handle
 -}
-sendWithHandle : Handle -> Cmd -> Platform.Cmd.Cmd msg
-sendWithHandle (Handle socketHandle) cmd =
+sendWithHandle : CommandPort msg -> Handle -> Cmd -> Platform.Cmd.Cmd msg
+sendWithHandle commandPort (Handle socketHandle) cmd =
     let
         ( cmdString, data ) =
             encodeWsCmd cmd
     in
-    wsCmd ( socketHandle, cmdString, data )
+    commandPort ( socketHandle, cmdString, data )
 
 
 {-| Send a command to `default` socket
 -}
-send : Cmd -> Platform.Cmd.Cmd msg
-send =
-    sendWithHandle (Handle "default")
+send : CommandPort msg -> Cmd -> Platform.Cmd.Cmd msg
+send commandPort =
+    sendWithHandle commandPort (Handle "default")
 
 
 {-| Connect to a specified socket as default
 -}
-open : String -> Platform.Cmd.Cmd msg
-open url =
-    send <| Open url []
+open : CommandPort msg -> String -> Platform.Cmd.Cmd msg
+open commandPort url =
+    send commandPort <| Open url []
 
 
 {-| Close the default connection
 -}
-close : Platform.Cmd.Cmd msg
-close =
-    send <| Close Nothing
+close : CommandPort msg -> Platform.Cmd.Cmd msg
+close commandPort =
+    send commandPort <| Close Nothing
 
 
 {-| JSON-encode a message and send it to the `default` socket
 -}
-transmitMsg : (t -> E.Value) -> t -> Platform.Cmd.Cmd msg
-transmitMsg =
-    transmitMsgWithHandle (Handle "default")
+transmitMsg : CommandPort msg -> (t -> E.Value) -> t -> Platform.Cmd.Cmd msg
+transmitMsg commandPort =
+    transmitMsgWithHandle commandPort (Handle "default")
 
 
 {-| JSON-encode a message and send it to a socket specified by handle
 -}
-transmitMsgWithHandle : Handle -> (t -> E.Value) -> t -> Platform.Cmd.Cmd msg
-transmitMsgWithHandle socketHandle enc msg =
-    enc msg |> E.encode 0 |> Transmit |> sendWithHandle socketHandle
+transmitMsgWithHandle : CommandPort msg -> Handle -> (t -> E.Value) -> t -> Platform.Cmd.Cmd msg
+transmitMsgWithHandle commandPort socketHandle enc msg =
+    enc msg |> E.encode 0 |> Transmit |> sendWithHandle commandPort socketHandle
 
 
 {-| Command that can be sent to a websocket:
@@ -446,19 +449,6 @@ decodeWsMsg ( handleValue, kind, data ) =
                 , message = "received an invalid message through channel: " ++ kind
                 }
     )
-
-
-{-| Websocket outgoing port.
-
-Data is sent out as `(handle, command, data)`.
-
--}
-port wsCmd : CommandPort msg
-
-
-{-| Websocket incoming port.
--}
-port wsMsg : EventPort msg
 
 
 

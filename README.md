@@ -29,6 +29,7 @@ ElmWebsockets.initApp(app);
 Subscribe before opening a socket. Wait for `Connected` before transmitting.
 
 ```elm
+import WebsocketPorts as Ports
 import WebsocketSimple as Ws
 
 
@@ -42,17 +43,17 @@ type Msg
 
 init : () -> ( Model, Cmd Msg )
 init _ =
-    ( [], Ws.open "ws://127.0.0.1:8765" )
+    ( [], Ws.open Ports.wsCmd "ws://127.0.0.1:8765" )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         WebSocketEvent (Ws.Connected _) ->
-            ( model, Ws.send (Ws.Transmit "hello") )
+            ( model, Ws.send Ports.wsCmd (Ws.Transmit "hello") )
 
         WebSocketEvent (Ws.Text value) ->
-            ( value :: model, Ws.close )
+            ( value :: model, Ws.close Ports.wsCmd )
 
         WebSocketEvent (Ws.Disconnected _) ->
             ( model, Cmd.none )
@@ -63,7 +64,7 @@ update msg model =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Sub.map WebSocketEvent Ws.subscribe
+    Sub.map WebSocketEvent (Ws.subscribe Ports.wsMsg)
 ```
 
 ## Multiple connections
@@ -84,19 +85,19 @@ alertsHandle =
 openConnections : Cmd msg
 openConnections =
     Cmd.batch
-        [ Ws.sendWithHandle chatHandle (Ws.Open chatUrl [])
-        , Ws.sendWithHandle alertsHandle (Ws.Open alertsUrl [])
+        [ Ws.sendWithHandle Ports.wsCmd chatHandle (Ws.Open chatUrl [])
+        , Ws.sendWithHandle Ports.wsCmd alertsHandle (Ws.Open alertsUrl [])
         ]
 
 
 sendChat : String -> Cmd msg
 sendChat message =
-    Ws.sendWithHandle chatHandle (Ws.Transmit message)
+    Ws.sendWithHandle Ports.wsCmd chatHandle (Ws.Transmit message)
 
 
 closeChat : Cmd msg
 closeChat =
-    Ws.sendWithHandle chatHandle (Ws.Close Nothing)
+    Ws.sendWithHandle Ports.wsCmd chatHandle (Ws.Close Nothing)
 ```
 
 Use `subscribeWithHandle` to receive the originating handle with each event:
@@ -108,7 +109,7 @@ type Msg
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Sub.map WebSocketEvent Ws.subscribeWithHandle
+    Sub.map WebSocketEvent (Ws.subscribeWithHandle Ports.wsMsg)
 ```
 
 Use `handleToString` when the string representation is needed. `send` and `subscribe` use the implicit `"default"` handle. `subscribe` discards handle information.
@@ -191,7 +192,7 @@ type Msg
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Ws.subscribeMsg payloadDecoder WebSocketMessage
+    Ws.subscribeMsg Ports.wsMsg payloadDecoder WebSocketMessage
 ```
 
 The resulting messages are `Established`, `Closed`, `Received`, `TransportFailure`, or `PayloadDecodeFailure`. `Established` contains the negotiated subprotocol, if any. Payload decoding failures retain the original text and `Json.Decode.Error`. To send JSON, `transmitMsg` applies an encoder and transmits the encoded value. The `subscribeMsgWithHandle` and `transmitMsgWithHandle` variants preserve the handle for multiple connections. Use `parseIncoming` when decoding a `RawMsg` explicitly.
