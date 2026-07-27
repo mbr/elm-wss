@@ -22,7 +22,7 @@ ElmWebsockets = (function() {
   var pub = {};
 
   pub.initApp = function(app) {
-    if (app.ports && app.ports.wsCmd) {
+    if (app.ports && app.ports.wsCmd && app.ports.wsMsg) {
       app.webSockets = new Map();
 
       function emitError(handle, kind, message) {
