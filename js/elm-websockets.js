@@ -22,15 +22,17 @@ ElmWebsockets = (function() {
   var pub = {};
 
   pub.initApp = function(app) {
-    if (app.ports && app.ports.wsCmd && app.ports.wsMsg) {
+    if (app.ports && app.ports.wsCmd) {
       app.webSockets = new Map();
 
+      function emit(message) {
+        if (app.ports.wsMsg) {
+          app.ports.wsMsg.send(message);
+        }
+      }
+
       function emitError(handle, kind, message) {
-        app.ports.wsMsg.send([
-          handle,
-          "error",
-          { kind: kind, message: message }
-        ]);
+        emit([handle, "error", { kind: kind, message: message }]);
       }
 
       function reportError(handle, operation, error) {
@@ -80,7 +82,7 @@ ElmWebsockets = (function() {
                 return;
               }
               app.webSockets.delete(handle);
-              app.ports.wsMsg.send([
+              emit([
                 handle,
                 "disconnected",
                 {
@@ -105,7 +107,7 @@ ElmWebsockets = (function() {
               // We need to differentiate different types of data here.
               switch (typeof messageEvent.data) {
                 case "string":
-                  app.ports.wsMsg.send([handle, "message", messageEvent.data]);
+                  emit([handle, "message", messageEvent.data]);
                   break;
                 default:
                   emitError(
@@ -124,7 +126,7 @@ ElmWebsockets = (function() {
                 return;
               }
 
-              app.ports.wsMsg.send([handle, "connected", ws.protocol || null]);
+              emit([handle, "connected", ws.protocol || null]);
             };
             break;
 
@@ -166,8 +168,6 @@ ElmWebsockets = (function() {
             throw new Error("unknown websocket command: " + cmd);
         }
       });
-    } else {
-      throw new Error("websocket port is not defined in Elm app");
     }
   };
 
