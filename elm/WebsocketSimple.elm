@@ -24,6 +24,8 @@ port module WebsocketSimple exposing
     ( CloseDetails
     , CloseRequest
     , Cmd(..)
+    , CommandPort
+    , EventPort
     , Handle
     , Msg(..)
     , RawMsg(..)
@@ -57,6 +59,18 @@ called. Subscribe to websocket messages through `subscribe`, send them using
 import Json.Decode as D
 import Json.Encode as E
 import Platform.Cmd
+
+
+{-| Sends encoded commands to the JavaScript runtime.
+-}
+type alias CommandPort msg =
+    ( String, String, E.Value ) -> Platform.Cmd.Cmd msg
+
+
+{-| Receives encoded events from the JavaScript runtime.
+-}
+type alias EventPort msg =
+    (( String, String, E.Value ) -> msg) -> Sub msg
 
 
 {-| Identifies a particular websocket
@@ -439,12 +453,12 @@ decodeWsMsg ( handleValue, kind, data ) =
 Data is sent out as `(handle, command, data)`.
 
 -}
-port wsCmd : ( String, String, E.Value ) -> Platform.Cmd.Cmd msg
+port wsCmd : CommandPort msg
 
 
 {-| Websocket incoming port.
 -}
-port wsMsg : (( String, String, E.Value ) -> msg) -> Sub msg
+port wsMsg : EventPort msg
 
 
 
