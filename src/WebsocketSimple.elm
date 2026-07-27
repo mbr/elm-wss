@@ -74,7 +74,7 @@ Pass the application-owned ports described by these aliases to commands and subs
 
 # Basic usage
 
-Subscribe to events before opening a connection, and wait for `Connected` before transmitting.
+Subscribe to events before opening a connection, and wait for `Connected` before transmitting:
 
     import WebsocketPorts as Ports
     import WebsocketSimple as WebSocket
