@@ -41,15 +41,15 @@ Install the Elm package:
 elm install mbr/elm-wss
 ```
 
-Elm packages cannot declare ports, so copy [`ports/WebsocketPorts.elm`](https://github.com/mbr/elm-wss/blob/1.0.0/ports/WebsocketPorts.elm) into an application source directory. It contains the application-owned port declarations:
-
-    port module WebsocketPorts exposing (wsCmd, wsMsg)
+Elm packages cannot declare ports. Make `Main.elm` a `port module`, or use another application-owned `port module`, then add these declarations:
 
     import WebsocketSimple exposing (CommandPort, EventPort)
 
     port wsCmd : CommandPort msg
 
     port wsMsg : EventPort msg
+
+The JavaScript runtime expects the exact port names `wsCmd` and `wsMsg`.
 
 Copy [`js/elm-websockets.js`](https://github.com/mbr/elm-wss/blob/1.0.0/js/elm-websockets.js) into the browser assets. Load the runtime and compiled Elm application, initialize Elm, and then initialize the runtime:
 
