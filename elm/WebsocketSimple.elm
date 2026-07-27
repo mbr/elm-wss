@@ -21,38 +21,126 @@
 
 
 module WebsocketSimple exposing
-    ( CloseDetails
-    , CloseRequest
-    , Cmd(..)
-    , CommandPort
-    , EventPort
-    , Handle
-    , Msg(..)
-    , RawMsg(..)
-    , TransportErrorDetails
-    , TransportErrorKind(..)
-    , close
-    , errorKindToString
-    , errorToString
-    , handle
-    , handleToString
-    , open
-    , parseIncoming
-    , send
-    , sendWithHandle
-    , subscribe
-    , subscribeMsg
-    , subscribeMsgWithHandle
-    , subscribeWithHandle
-    , transmitMsg
-    , transmitMsgWithHandle
+    ( CommandPort, EventPort
+    , Cmd(..), CloseRequest, open, close, send, sendWithHandle
+    , Handle, handle, handleToString
+    , RawMsg(..), CloseDetails, TransportErrorKind(..), TransportErrorDetails, subscribe, subscribeWithHandle, errorKindToString, errorToString
+    , Msg(..), subscribeMsg, subscribeMsgWithHandle, transmitMsg, transmitMsgWithHandle, parseIncoming
     )
 
-{-| The simple websockets module.
+{-| A small WebSocket client backed by a compact JavaScript runtime.
 
-To get start, ensure the runtime is installed (`elm-websockets.js`) and
-called. Subscribe to websocket messages through `subscribe`, send them using
-`send`. That's it.
+Subscribe before opening a socket and wait for `Connected` before transmitting. Accepted transmissions emit no event because the browser provides no per-message delivery acknowledgement.
+
+
+# Ports
+
+Applications declare the two ports described by these aliases and pass them to commands and subscriptions.
+
+@docs CommandPort, EventPort
+
+
+# Basic usage
+
+    import WebsocketPorts as Ports
+    import WebsocketSimple as WebSocket
+
+    type Msg
+        = WebSocketEvent WebSocket.RawMsg
+
+    init : () -> ( List String, Cmd Msg )
+    init _ =
+        ( [], WebSocket.open Ports.wsCmd "ws://127.0.0.1:8765" )
+
+    update : Msg -> List String -> ( List String, Cmd Msg )
+    update msg model =
+        case msg of
+            WebSocketEvent (WebSocket.Connected _) ->
+                ( model, WebSocket.send Ports.wsCmd (WebSocket.Transmit "hello") )
+
+            WebSocketEvent (WebSocket.Text value) ->
+                ( value :: model, WebSocket.close Ports.wsCmd )
+
+            WebSocketEvent (WebSocket.Disconnected _) ->
+                ( model, Cmd.none )
+
+            WebSocketEvent (WebSocket.TransportError error) ->
+                ( WebSocket.errorToString error :: model, Cmd.none )
+
+    subscriptions : List String -> Sub Msg
+    subscriptions _ =
+        Sub.map WebSocketEvent (WebSocket.subscribe Ports.wsMsg)
+
+
+# Commands
+
+`send` and its convenience functions use an implicit `"default"` handle. Use `sendWithHandle` for multiple connections.
+
+@docs Cmd, CloseRequest, open, close, send, sendWithHandle
+
+
+# Handles
+
+Each connection is identified by an opaque handle encoded as a string at the port boundary.
+
+    chat : WebSocket.Handle
+    chat =
+        WebSocket.handle "chat"
+
+    alerts : WebSocket.Handle
+    alerts =
+        WebSocket.handle "alerts"
+
+    openConnections : Cmd msg
+    openConnections =
+        Cmd.batch
+            [ WebSocket.sendWithHandle Ports.wsCmd chat (WebSocket.Open chatUrl [])
+            , WebSocket.sendWithHandle Ports.wsCmd alerts (WebSocket.Open alertsUrl [])
+            ]
+
+@docs Handle, handle, handleToString
+
+
+# Events
+
+`subscribe` discards handle information. Use `subscribeWithHandle` to distinguish events from multiple connections.
+
+    type Msg
+        = WebSocketEvent ( WebSocket.Handle, WebSocket.RawMsg )
+
+    subscriptions : model -> Sub Msg
+    subscriptions _ =
+        Sub.map WebSocketEvent (WebSocket.subscribeWithHandle Ports.wsMsg)
+
+@docs RawMsg, CloseDetails, TransportErrorKind, TransportErrorDetails, subscribe, subscribeWithHandle, errorKindToString, errorToString
+
+
+# JSON
+
+Regular subscriptions expose incoming text frames as `Text String`. Typed subscriptions decode text frames while keeping transport errors separate from payload decoding failures.
+
+    import Json.Decode as Decode
+
+    type alias Payload =
+        { message : String }
+
+    payloadDecoder : Decode.Decoder Payload
+    payloadDecoder =
+        Decode.map Payload (Decode.field "message" Decode.string)
+
+    type Msg
+        = WebSocketMessage (WebSocket.Msg Payload)
+
+    subscriptions : model -> Sub Msg
+    subscriptions _ =
+        WebSocket.subscribeMsg Ports.wsMsg payloadDecoder WebSocketMessage
+
+@docs Msg, subscribeMsg, subscribeMsgWithHandle, transmitMsg, transmitMsgWithHandle, parseIncoming
+
+
+# Example
+
+Start a local echo server with `websocat -E --text ws-l:127.0.0.1:8765 mirror:`, run `./build.sh` from `example/`, and open `index.html`. The endpoint can be overridden with a query parameter such as `index.html?url=ws://127.0.0.1:9000`.
 
 -}
 
@@ -61,45 +149,48 @@ import Json.Encode as E
 import Platform.Cmd
 
 
-{-| Sends encoded commands to the JavaScript runtime.
+{-| Type of an application-owned port that sends encoded commands to the JavaScript runtime.
 -}
 type alias CommandPort msg =
     ( String, String, E.Value ) -> Platform.Cmd.Cmd msg
 
 
-{-| Receives encoded events from the JavaScript runtime.
+{-| Type of an application-owned port that receives encoded events from the JavaScript runtime.
 -}
 type alias EventPort msg =
     (( String, String, E.Value ) -> msg) -> Sub msg
 
 
-{-| Identifies a particular websocket
+{-| Identifies a particular WebSocket connection.
 -}
 type Handle
     = Handle String
 
 
-{-| Construct a websocket handle
+{-| Construct a WebSocket handle from its port-boundary representation.
 -}
 handle : String -> Handle
 handle =
     Handle
 
 
-{-| Return a websocket handle's string representation
+{-| Return a WebSocket handle's string representation.
 -}
 handleToString : Handle -> String
 handleToString (Handle value) =
     value
 
 
-{-| Websocket URL to connect to (`ws://..` or `ws:///...`)
+{-| WebSocket endpoint URL.
 -}
 type alias Url =
     String
 
 
-{-| Details supplied when a websocket closes
+{-| Details supplied when a WebSocket closes.
+
+The event may arrive even when the connection never opened. `initiatedLocally` records whether this client successfully requested closure.
+
 -}
 type alias CloseDetails =
     { code : Int
@@ -109,7 +200,10 @@ type alias CloseDetails =
     }
 
 
-{-| Describes an application-requested close
+{-| Describes an application-requested close.
+
+Use an empty reason to send only the explicit close code.
+
 -}
 type alias CloseRequest =
     { code : Int
@@ -117,7 +211,7 @@ type alias CloseRequest =
     }
 
 
-{-| Categorizes a websocket transport error
+{-| Categorizes a WebSocket transport error.
 -}
 type TransportErrorKind
     = ConstructionFailure
@@ -129,7 +223,7 @@ type TransportErrorKind
     | PortDecodingFailure
 
 
-{-| Describes a websocket transport error
+{-| Describes a categorized WebSocket transport error.
 -}
 type alias TransportErrorDetails =
     { kind : TransportErrorKind
@@ -137,14 +231,14 @@ type alias TransportErrorDetails =
     }
 
 
-{-| Render a transport error as a readable string
+{-| Render a transport error as a readable string containing its category and message.
 -}
 errorToString : TransportErrorDetails -> String
 errorToString error =
     "[" ++ errorKindToString error.kind ++ "] " ++ error.message
 
 
-{-| Render a transport error kind as a readable string
+{-| Render a transport error category as a string.
 -}
 errorKindToString : TransportErrorKind -> String
 errorKindToString kind =
@@ -171,31 +265,31 @@ errorKindToString kind =
             "PortDecodingFailure"
 
 
-{-| Subscribe for incoming messages tagged with their handle
-
-Yields tuples of `(handle, msg)`
-
+{-| Subscribe to raw events paired with their originating handles.
 -}
 subscribeWithHandle : EventPort ( Handle, RawMsg ) -> Sub ( Handle, RawMsg )
 subscribeWithHandle eventPort =
     eventPort decodeWsMsg
 
 
-{-| Subscribe for incoming messages, discarding handle information
+{-| Subscribe to raw events from the implicit default connection.
+
+This discards the originating handle from every event.
+
 -}
 subscribe : EventPort RawMsg -> Sub RawMsg
 subscribe eventPort =
     eventPort (decodeWsMsg >> Tuple.second)
 
 
-{-| Subscribe and parse JSON of incoming messages, discarding handle information
+{-| Subscribe to typed JSON events while discarding handle information.
 -}
 subscribeMsg : EventPort msg -> D.Decoder t -> (Msg t -> msg) -> Sub msg
 subscribeMsg eventPort dec wrap =
     eventPort (decodeWsMsg >> Tuple.second >> parseIncoming dec >> wrap)
 
 
-{-| Subscribe and parse JSON of incoming messages, preserving handle info
+{-| Subscribe to typed JSON events paired with their originating handles.
 -}
 subscribeMsgWithHandle : EventPort msg -> D.Decoder t -> (( Handle, Msg t ) -> msg) -> Sub msg
 subscribeMsgWithHandle eventPort dec wrap =
@@ -209,7 +303,7 @@ subscribeMsgWithHandle eventPort dec wrap =
         )
 
 
-{-| Send a message to a websocket specified by handle
+{-| Send a command to the connection identified by a handle.
 -}
 sendWithHandle : CommandPort msg -> Handle -> Cmd -> Platform.Cmd.Cmd msg
 sendWithHandle commandPort (Handle socketHandle) cmd =
@@ -220,46 +314,46 @@ sendWithHandle commandPort (Handle socketHandle) cmd =
     commandPort ( socketHandle, cmdString, data )
 
 
-{-| Send a command to `default` socket
+{-| Send a command to the implicit `"default"` connection.
 -}
 send : CommandPort msg -> Cmd -> Platform.Cmd.Cmd msg
 send commandPort =
     sendWithHandle commandPort (Handle "default")
 
 
-{-| Connect to a specified socket as default
+{-| Open the implicit default connection without requesting a subprotocol.
 -}
 open : CommandPort msg -> String -> Platform.Cmd.Cmd msg
 open commandPort url =
     send commandPort <| Open url []
 
 
-{-| Close the default connection
+{-| Close the implicit default connection with the browser's default status.
 -}
 close : CommandPort msg -> Platform.Cmd.Cmd msg
 close commandPort =
     send commandPort <| Close Nothing
 
 
-{-| JSON-encode a message and send it to the `default` socket
+{-| Encode a value as JSON and transmit it through the implicit default connection.
 -}
 transmitMsg : CommandPort msg -> (t -> E.Value) -> t -> Platform.Cmd.Cmd msg
 transmitMsg commandPort =
     transmitMsgWithHandle commandPort (Handle "default")
 
 
-{-| JSON-encode a message and send it to a socket specified by handle
+{-| Encode a value as JSON and transmit it through the connection identified by a handle.
 -}
 transmitMsgWithHandle : CommandPort msg -> Handle -> (t -> E.Value) -> t -> Platform.Cmd.Cmd msg
 transmitMsgWithHandle commandPort socketHandle enc msg =
     enc msg |> E.encode 0 |> Transmit |> sendWithHandle commandPort socketHandle
 
 
-{-| Command that can be sent to a websocket:
+{-| Command sent to a WebSocket connection.
 
-  - `Open` opens a connection to the specified URL with ordered subprotocols
-  - `Transmit` sends a text message string
-  - `Close` closes the connection with optional close details
+  - `Open` opens the URL with an ordered list of requested subprotocols. An empty list requests none.
+  - `Transmit` sends a text frame. A rejected transmission produces a `TransportError`; an accepted transmission produces no acknowledgement.
+  - `Close Nothing` preserves the browser's default close behavior. `Close (Just request)` sends the supplied code and reason unchanged, leaving validation to the browser.
 
 -}
 type Cmd
@@ -268,12 +362,12 @@ type Cmd
     | Close (Maybe CloseRequest)
 
 
-{-| Messages that are received from websockets
+{-| Raw event received from a WebSocket connection.
 
-  - `Connected` when the connection succeeds, with the negotiated subprotocol
-  - `Disconnected` when the connection has been terminated, with close details
-  - `Text` when a new text-message has arrived on the socket
-  - `TransportError` on a transport or port error
+  - `Connected` means the connection can transmit and contains the negotiated subprotocol, if any.
+  - `Disconnected` contains the browser's close details and may occur without a preceding `Connected` event.
+  - `Text` contains a received text frame. Binary frames are unsupported and produce a transport error.
+  - `TransportError` describes a construction, send, close, browser, unsupported-data, or port-decoding failure.
 
 -}
 type RawMsg
@@ -283,10 +377,9 @@ type RawMsg
     | TransportError TransportErrorDetails
 
 
-{-| Typed messages received from websockets
+{-| Typed event received from a WebSocket connection carrying JSON text frames.
 
-When receiving JSON-encoded messages via websockets, this type keeps transport
-errors separate from payload decoding failures.
+Transport failures remain separate from payload decoding failures. `PayloadDecodeFailure` retains both the original text and the `Json.Decode.Error`.
 
 -}
 type Msg t
@@ -297,7 +390,7 @@ type Msg t
     | PayloadDecodeFailure String D.Error
 
 
-{-| Convert a `RawMsg` into a `Msg`
+{-| Convert a raw event into a typed JSON event.
 -}
 parseIncoming : D.Decoder t -> RawMsg -> Msg t
 parseIncoming decoder rawMsg =
@@ -320,7 +413,7 @@ parseIncoming decoder rawMsg =
                     PayloadDecodeFailure txt error
 
 
-{-| Helper function to encode a command to be sent over the channel
+{-| Encode a command for the JavaScript runtime.
 -}
 encodeWsCmd : Cmd -> ( String, E.Value )
 encodeWsCmd cmd =
@@ -354,7 +447,7 @@ encodeWsCmd cmd =
             )
 
 
-{-| Decode a JSON string, yield an `Err` on failure
+{-| Decode an event payload, converting failures into transport errors.
 -}
 decodeHelper : D.Decoder v -> (v -> RawMsg) -> D.Value -> RawMsg
 decodeHelper decoder map value =
@@ -369,7 +462,7 @@ decodeHelper decoder map value =
             )
 
 
-{-| Decode a transport error kind
+{-| Decode a transport error category.
 -}
 decodeTransportErrorKind : D.Decoder TransportErrorKind
 decodeTransportErrorKind =
@@ -400,7 +493,7 @@ decodeTransportErrorKind =
             )
 
 
-{-| Decode a transport error
+{-| Decode transport error details.
 -}
 decodeTransportError : D.Decoder TransportErrorDetails
 decodeTransportError =
@@ -414,7 +507,7 @@ decodeTransportError =
         (D.field "message" D.string)
 
 
-{-| Decode websocket close details
+{-| Decode WebSocket close details.
 -}
 decodeCloseDetails : D.Decoder CloseDetails
 decodeCloseDetails =
@@ -425,7 +518,7 @@ decodeCloseDetails =
         (D.field "initiatedLocally" D.bool)
 
 
-{-| Decode an incoming websocket message from javascript
+{-| Decode an event from the JavaScript runtime.
 -}
 decodeWsMsg : ( String, String, E.Value ) -> ( Handle, RawMsg )
 decodeWsMsg ( handleValue, kind, data ) =
@@ -481,6 +574,8 @@ decodeWsMsg ( handleValue, kind, data ) =
 -}
 
 
+{-| Resolve a result by mapping its error value.
+-}
 extract : (e -> a) -> Result e a -> a
 extract f x =
     case x of
