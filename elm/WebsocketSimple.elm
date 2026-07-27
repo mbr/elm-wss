@@ -174,7 +174,7 @@ subscribe =
     Sub.map Tuple.second subscribeWithHandle
 
 
-{-| Subscribe and parse JSON of incoming messages, discarding handler info
+{-| Subscribe and parse JSON of incoming messages, discarding handle information
 -}
 subscribeMsg : D.Decoder t -> (Msg t -> msg) -> Sub msg
 subscribeMsg dec wrap =
