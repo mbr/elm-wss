@@ -28,7 +28,7 @@ module WebsocketSimple exposing
     , Msg(..), subscribeMsg, subscribeMsgWithHandle, transmitMsg, transmitMsgWithHandle, parseIncoming
     )
 
-{-| A small, typed WebSocket client for Elm with a compact, auditable JavaScript runtime. It supports multiple connections, lifecycle events, and text or JSON messages.
+{-| A small, typed WebSocket client for Elm with a compact, auditable JavaScript runtime. It supports multiple connections, lifecycle events, and text, binary, or JSON messages.
 
 
 # Installation
@@ -95,6 +95,9 @@ Subscribe to events before opening a connection, and wait for `Connected` before
             WebSocketEvent (WebSocket.Text value) ->
                 ( value :: model, WebSocket.close Ports.wsCmd )
 
+            WebSocketEvent (WebSocket.Binary _) ->
+                ( model, WebSocket.close Ports.wsCmd )
+
             WebSocketEvent (WebSocket.Disconnected _) ->
                 ( model, Cmd.none )
 
@@ -151,7 +154,7 @@ Each connection is identified by an opaque handle encoded as a string at the por
 
 # JSON
 
-Regular subscriptions expose incoming text frames as `Text String`. Typed subscriptions decode text frames while keeping transport errors separate from payload decoding failures.
+Regular subscriptions expose incoming text and binary frames as `Text String` and `Binary Bytes`. Typed subscriptions decode text frames while keeping transport errors separate from payload decoding failures. A binary frame received through a typed JSON subscription produces an `UnsupportedData` transport failure.
 
     import Json.Decode as Decode
 
@@ -173,6 +176,10 @@ Regular subscriptions expose incoming text frames as `Text String`. Typed subscr
 
 -}
 
+import Bitwise
+import Bytes exposing (Bytes)
+import Bytes.Decode as BytesDecode exposing (Decoder, Step(..))
+import Bytes.Encode as BytesEncode
 import Json.Decode as D
 import Json.Encode as E
 import Platform.Cmd
@@ -381,13 +388,16 @@ transmitMsgWithHandle commandPort socketHandle enc msg =
 {-| Command sent to a WebSocket connection.
 
   - `Open` opens the URL with an ordered list of requested subprotocols. An empty list requests none.
-  - `Transmit` sends a text frame. A rejected transmission produces a `TransportError`; an accepted transmission produces no acknowledgement.
+  - `Transmit` sends a text frame.
+  - `TransmitBinary` sends a binary frame.
+  - A rejected transmission produces a `TransportError`; an accepted transmission produces no acknowledgement.
   - `Close Nothing` preserves the browser's default close behavior. `Close (Just request)` sends the supplied code and reason unchanged, leaving validation to the browser.
 
 -}
 type Cmd
     = Open Url (List String)
     | Transmit String
+    | TransmitBinary Bytes
     | Close (Maybe CloseRequest)
 
 
@@ -395,14 +405,18 @@ type Cmd
 
   - `Connected` means the connection can transmit and contains the negotiated subprotocol, if any.
   - `Disconnected` contains the browser's close details and may occur without a preceding `Connected` event.
-  - `Text` contains a received text frame. Binary frames are unsupported and produce a transport error.
+  - `Text` contains a received text frame.
+  - `Binary` contains a received binary frame.
   - `TransportError` describes a construction, send, close, browser, unsupported-data, or port-decoding failure.
+
+Binary reads are asynchronous and do not preserve ordering between binary frames and other events.
 
 -}
 type RawMsg
     = Connected (Maybe String)
     | Disconnected CloseDetails
     | Text String
+    | Binary Bytes
     | TransportError TransportErrorDetails
 
 
@@ -441,6 +455,12 @@ parseIncoming decoder rawMsg =
                 Err error ->
                     PayloadDecodeFailure txt error
 
+        Binary _ ->
+            TransportFailure
+                { kind = UnsupportedData
+                , message = "received binary message through JSON subscription"
+                }
+
 
 {-| Encode a command for the JavaScript runtime.
 -}
@@ -458,6 +478,9 @@ encodeWsCmd cmd =
         Transmit data ->
             ( "transmit", E.string data )
 
+        TransmitBinary bytes ->
+            ( "transmit-binary", E.string (bytesToByteString bytes) )
+
         Close closeRequest ->
             let
                 ( code, reason ) =
@@ -474,6 +497,163 @@ encodeWsCmd cmd =
                 , ( "reason", reason )
                 ]
             )
+
+
+{-| Convert a byte string to bytes using one encoder per four characters.
+-}
+byteStringToBytes : String -> Bytes
+byteStringToBytes byteString =
+    let
+        ( count, word, reversedEncoders ) =
+            String.foldl foldByteStringCharacter ( 0, 0, [] ) byteString
+    in
+    finishByteStringEncoding count word reversedEncoders
+        |> BytesEncode.sequence
+        |> BytesEncode.encode
+
+
+{-| Incorporate one byte-string character into a pending word.
+-}
+foldByteStringCharacter : Char -> ( Int, Int, List BytesEncode.Encoder ) -> ( Int, Int, List BytesEncode.Encoder )
+foldByteStringCharacter character ( count, word, reversedEncoders ) =
+    let
+        nextWord =
+            Bitwise.or
+                (Bitwise.shiftLeftBy 8 word)
+                (Char.toCode character)
+    in
+    if count == 3 then
+        ( 0
+        , 0
+        , BytesEncode.signedInt32 Bytes.BE nextWord :: reversedEncoders
+        )
+
+    else
+        ( count + 1, nextWord, reversedEncoders )
+
+
+{-| Flush a partial byte-string word and restore encoder order.
+-}
+finishByteStringEncoding : Int -> Int -> List BytesEncode.Encoder -> List BytesEncode.Encoder
+finishByteStringEncoding count word reversedEncoders =
+    case count of
+        1 ->
+            List.reverse
+                (BytesEncode.unsignedInt8 (Bitwise.and 0xFF word)
+                    :: reversedEncoders
+                )
+
+        2 ->
+            List.reverse
+                (BytesEncode.unsignedInt16 Bytes.BE (Bitwise.and 0xFFFF word)
+                    :: reversedEncoders
+                )
+
+        3 ->
+            List.reverse
+                (BytesEncode.unsignedInt8 (Bitwise.and 0xFF word)
+                    :: BytesEncode.unsignedInt16
+                        Bytes.BE
+                        (Bitwise.and 0xFFFF (Bitwise.shiftRightZfBy 8 word))
+                    :: reversedEncoders
+                )
+
+        _ ->
+            List.reverse reversedEncoders
+
+
+{-| Convert bytes to a byte string in batches of five words.
+-}
+bytesToByteString : Bytes -> String
+bytesToByteString bytes =
+    BytesDecode.decode
+        (BytesDecode.loop
+            { remaining = Bytes.width bytes, string = "" }
+            byteStringDecodeStep
+        )
+        bytes
+        |> Maybe.withDefault ""
+
+
+{-| Advance byte-string decoding by one batch.
+-}
+byteStringDecodeStep :
+    { remaining : Int, string : String }
+    -> Decoder (Step { remaining : Int, string : String } String)
+byteStringDecodeStep state =
+    if state.remaining >= 20 then
+        BytesDecode.map
+            (\chunk ->
+                Loop
+                    { remaining = state.remaining - 20
+                    , string = state.string ++ chunk
+                    }
+            )
+            decodeTwentyBytes
+
+    else if state.remaining >= 4 then
+        BytesDecode.map
+            (\word ->
+                Loop
+                    { remaining = state.remaining - 4
+                    , string = state.string ++ wordToByteString word
+                    }
+            )
+            decodeWord
+
+    else if state.remaining == 0 then
+        BytesDecode.succeed (Done state.string)
+
+    else
+        BytesDecode.map
+            (\byte ->
+                Loop
+                    { remaining = state.remaining - 1
+                    , string = state.string ++ String.fromChar (Char.fromCode byte)
+                    }
+            )
+            BytesDecode.unsignedInt8
+
+
+{-| Decode five words into one byte-string chunk.
+-}
+decodeTwentyBytes : Decoder String
+decodeTwentyBytes =
+    BytesDecode.map5
+        (\a b c d e ->
+            wordToByteString a
+                ++ wordToByteString b
+                ++ wordToByteString c
+                ++ wordToByteString d
+                ++ wordToByteString e
+        )
+        decodeWord
+        decodeWord
+        decodeWord
+        decodeWord
+        decodeWord
+
+
+{-| Decode one big-endian word.
+-}
+decodeWord : Decoder Int
+decodeWord =
+    BytesDecode.unsignedInt32 Bytes.BE
+
+
+{-| Convert a word to four byte-string characters.
+-}
+wordToByteString : Int -> String
+wordToByteString word =
+    String.cons
+        (Char.fromCode (Bitwise.shiftRightZfBy 24 word))
+        (String.cons
+            (Char.fromCode (Bitwise.and 0xFF (Bitwise.shiftRightZfBy 16 word)))
+            (String.cons
+                (Char.fromCode (Bitwise.and 0xFF (Bitwise.shiftRightZfBy 8 word)))
+                (String.fromChar (Char.fromCode (Bitwise.and 0xFF word)))
+            )
+        )
 
 
 {-| Decode an event payload, converting failures into transport errors.
@@ -564,6 +744,9 @@ decodeWsMsg ( handleValue, kind, data ) =
 
         "message" ->
             decodeHelper D.string Text data
+
+        "binary" ->
+            decodeHelper D.string (byteStringToBytes >> Binary) data
 
         _ ->
             TransportError

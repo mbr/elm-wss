@@ -1,6 +1,6 @@
 # elm-wss: Simple WebSockets for Elm
 
-`elm-wss` makes browser WebSockets straightforward to use from Elm 0.19. Its small, typed API supports multiple connections, text and JSON messages, and explicit lifecycle and error handling. The JavaScript runtime stays compact, making it easy to vendor and audit.
+`elm-wss` makes browser WebSockets straightforward to use from Elm 0.19. Its small, typed API supports multiple connections, text, binary, and JSON messages, and explicit lifecycle and error handling. The JavaScript runtime stays compact, making it easy to vendor and audit.
 
 ## Core usage
 
@@ -32,6 +32,9 @@ update msg model =
 
         WebSocketEvent (Ws.Text message) ->
             ( message :: model, Cmd.none )
+
+        WebSocketEvent (Ws.Binary _) ->
+            ( model, Cmd.none )
 
         WebSocketEvent (Ws.Disconnected _) ->
             ( model, Cmd.none )

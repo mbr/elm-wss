@@ -45,6 +45,75 @@ ElmWebsockets = (function() {
         emitError(handle, operation, message);
       }
 
+      function bytesToByteString(bytes) {
+        var chunks = [];
+        var chunkSize = 32768;
+        for (var offset = 0; offset < bytes.length; offset += chunkSize) {
+          chunks.push(
+            String.fromCharCode.apply(
+              null,
+              bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length))
+            )
+          );
+        }
+        return chunks.join("");
+      }
+
+      function byteStringToBytes(byteString) {
+        var bytes = new Uint8Array(byteString.length);
+        for (var index = 0; index < byteString.length; index++) {
+          bytes[index] = byteString.charCodeAt(index);
+        }
+        return bytes;
+      }
+
+      function readBlob(blob, onLoad, onError) {
+        if (
+          typeof FileReader === "function" &&
+          typeof FileReader.prototype.readAsBinaryString === "function"
+        ) {
+          var reader = new FileReader();
+          reader.onload = function() {
+            if (typeof reader.result === "string") {
+              onLoad(reader.result);
+            } else {
+              onError(new Error("binary websocket message reader returned no string"));
+            }
+          };
+          reader.onerror = function() {
+            onError(reader.error || new Error("binary websocket message read failed"));
+          };
+          reader.onabort = function() {
+            onError(new Error("binary websocket message read was aborted"));
+          };
+          try {
+            reader.readAsBinaryString(blob);
+          } catch (error) {
+            onError(error);
+          }
+          return;
+        }
+
+        if (typeof blob.arrayBuffer !== "function") {
+          onError(new Error("browser cannot read binary websocket messages"));
+          return;
+        }
+
+        blob.arrayBuffer().then(
+          function(buffer) {
+            var byteString;
+            try {
+              byteString = bytesToByteString(new Uint8Array(buffer));
+            } catch (error) {
+              onError(error);
+              return;
+            }
+            onLoad(byteString);
+          },
+          onError
+        );
+      }
+
       app.ports.wsCmd.subscribe(function(msg) {
         var handle = msg[0];
         var cmd = msg[1];
@@ -68,6 +137,7 @@ ElmWebsockets = (function() {
               var ws = data.protocols.length
                 ? new WebSocket(data.url, data.protocols)
                 : new WebSocket(data.url);
+              ws.binaryType = "blob";
             } catch (error) {
               reportError(handle, "construction", error);
               break;
@@ -104,18 +174,31 @@ ElmWebsockets = (function() {
                 return;
               }
 
-              // We need to differentiate different types of data here.
-              switch (typeof messageEvent.data) {
-                case "string":
-                  emit([handle, "message", messageEvent.data]);
-                  break;
-                default:
-                  emitError(
-                    handle,
-                    "unsupported-data",
-                    "received unsupported binary websocket message"
-                  );
-                  break;
+              if (typeof messageEvent.data === "string") {
+                emit([handle, "message", messageEvent.data]);
+              } else if (
+                typeof Blob !== "undefined" &&
+                messageEvent.data instanceof Blob
+              ) {
+                readBlob(
+                  messageEvent.data,
+                  function(byteString) {
+                    if (app.webSockets.get(handle) === entry) {
+                      emit([handle, "binary", byteString]);
+                    }
+                  },
+                  function(error) {
+                    if (app.webSockets.get(handle) === entry) {
+                      reportError(handle, "transport", error);
+                    }
+                  }
+                );
+              } else {
+                emitError(
+                  handle,
+                  "unsupported-data",
+                  "received unsupported websocket message data"
+                );
               }
             };
             ws.onopen = function() {
@@ -131,10 +214,13 @@ ElmWebsockets = (function() {
             break;
 
           case "transmit":
+          case "transmit-binary":
             var entry = app.webSockets.get(handle);
             if (entry && entry.socket.readyState === WebSocket.OPEN) {
               try {
-                entry.socket.send(data);
+                entry.socket.send(
+                  cmd === "transmit-binary" ? byteStringToBytes(data) : data
+                );
               } catch (error) {
                 reportError(handle, "send", error);
               }
