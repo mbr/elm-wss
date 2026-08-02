@@ -31,18 +31,77 @@ ElmWebsockets = (function() {
         }
       }
 
-      function emitError(handle, kind, message) {
-        emit([handle, "error", { kind: kind, message: message }]);
+      function makeError(handle, kind, message) {
+        return [handle, "error", { kind: kind, message: message }];
       }
 
-      function reportError(handle, operation, error) {
+      function emitError(handle, kind, message) {
+        emit(makeError(handle, kind, message));
+      }
+
+      function makeReportedError(handle, operation, error) {
         var message = "websocket " + operation + " failed";
         if (error && typeof error.message === "string" && error.message) {
           message += ": " + error.message;
         } else if (typeof error === "string" && error) {
           message += ": " + error;
         }
-        emitError(handle, operation, message);
+        return makeError(handle, operation, message);
+      }
+
+      function reportError(handle, operation, error) {
+        emit(makeReportedError(handle, operation, error));
+      }
+
+      function deliverIncoming(entry, message, closes) {
+        if (closes) {
+          app.webSockets.delete(entry.handle);
+        }
+        emit(message);
+      }
+
+      function reserveIncoming(entry) {
+        var incomingEvent = {
+          closes: false,
+          message: null
+        };
+        entry.incomingEvents.push(incomingEvent);
+        return incomingEvent;
+      }
+
+      function drainIncoming(entry) {
+        while (
+          app.webSockets.get(entry.handle) === entry &&
+          entry.nextIncomingEvent < entry.incomingEvents.length
+        ) {
+          var incomingEvent = entry.incomingEvents[entry.nextIncomingEvent];
+          if (incomingEvent.message === null) {
+            return;
+          }
+
+          entry.nextIncomingEvent++;
+          deliverIncoming(entry, incomingEvent.message, incomingEvent.closes);
+        }
+
+        entry.incomingEvents = [];
+        entry.nextIncomingEvent = 0;
+      }
+
+      function completeIncoming(entry, incomingEvent, message) {
+        if (incomingEvent.message === null) {
+          incomingEvent.message = message;
+          drainIncoming(entry);
+        }
+      }
+
+      function queueIncoming(entry, message, closes) {
+        if (entry.incomingEvents.length === 0) {
+          deliverIncoming(entry, message, closes);
+          return;
+        }
+
+        entry.incomingEvents.push({ closes: closes, message: message });
+        drainIncoming(entry);
       }
 
       function bytesToByteString(bytes) {
@@ -143,7 +202,10 @@ ElmWebsockets = (function() {
               break;
             }
             var entry = {
+              handle: handle,
+              incomingEvents: [],
               initiatedLocally: false,
+              nextIncomingEvent: 0,
               socket: ws
             };
             app.webSockets.set(handle, entry);
@@ -151,23 +213,36 @@ ElmWebsockets = (function() {
               if (app.webSockets.get(handle) !== entry) {
                 return;
               }
-              app.webSockets.delete(handle);
-              emit([
-                handle,
-                "disconnected",
-                {
-                  code: typeof closeEvent.code === "number" ? closeEvent.code : 1006,
-                  initiatedLocally: entry.initiatedLocally,
-                  reason: typeof closeEvent.reason === "string" ? closeEvent.reason : "",
-                  wasClean: Boolean(closeEvent.wasClean)
-                }
-              ]);
+              queueIncoming(
+                entry,
+                [
+                  handle,
+                  "disconnected",
+                  {
+                    code:
+                      typeof closeEvent.code === "number"
+                        ? closeEvent.code
+                        : 1006,
+                    initiatedLocally: entry.initiatedLocally,
+                    reason:
+                      typeof closeEvent.reason === "string"
+                        ? closeEvent.reason
+                        : "",
+                    wasClean: Boolean(closeEvent.wasClean)
+                  }
+                ],
+                true
+              );
             };
             ws.onerror = function(errorEvent) {
               if (app.webSockets.get(handle) !== entry) {
                 return;
               }
-              reportError(handle, "transport", errorEvent);
+              queueIncoming(
+                entry,
+                makeReportedError(handle, "transport", errorEvent),
+                false
+              );
             };
             ws.onmessage = function(messageEvent) {
               if (app.webSockets.get(handle) !== entry) {
@@ -175,29 +250,42 @@ ElmWebsockets = (function() {
               }
 
               if (typeof messageEvent.data === "string") {
-                emit([handle, "message", messageEvent.data]);
+                queueIncoming(
+                  entry,
+                  [handle, "message", messageEvent.data],
+                  false
+                );
               } else if (
                 typeof Blob !== "undefined" &&
                 messageEvent.data instanceof Blob
               ) {
+                var incomingEvent = reserveIncoming(entry);
                 readBlob(
                   messageEvent.data,
                   function(byteString) {
-                    if (app.webSockets.get(handle) === entry) {
-                      emit([handle, "binary", byteString]);
-                    }
+                    completeIncoming(entry, incomingEvent, [
+                      handle,
+                      "binary",
+                      byteString
+                    ]);
                   },
                   function(error) {
-                    if (app.webSockets.get(handle) === entry) {
-                      reportError(handle, "transport", error);
-                    }
+                    completeIncoming(
+                      entry,
+                      incomingEvent,
+                      makeReportedError(handle, "transport", error)
+                    );
                   }
                 );
               } else {
-                emitError(
-                  handle,
-                  "unsupported-data",
-                  "received unsupported websocket message data"
+                queueIncoming(
+                  entry,
+                  makeError(
+                    handle,
+                    "unsupported-data",
+                    "received unsupported websocket message data"
+                  ),
+                  false
                 );
               }
             };

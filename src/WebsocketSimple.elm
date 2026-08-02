@@ -409,7 +409,7 @@ type Cmd
   - `Binary` contains a received binary frame.
   - `TransportError` describes a construction, send, close, browser, unsupported-data, or port-decoding failure.
 
-Binary reads are asynchronous and do not preserve ordering between binary frames and other events.
+Events preserve browser delivery order even though binary reads are asynchronous.
 
 -}
 type RawMsg
