@@ -49,7 +49,7 @@ Elm packages cannot declare ports. Make `Main.elm` a `port module`, or use anoth
 
 The JavaScript runtime expects the exact port names `wsCmd` and `wsMsg`.
 
-Copy [`js/elm-websockets.js`](https://github.com/mbr/elm-wss/blob/1.0.0/js/elm-websockets.js) into the browser assets. Load the runtime and compiled Elm application, initialize Elm, and then initialize the runtime:
+Copy [`js/elm-websockets.js`](https://github.com/mbr/elm-wss/blob/2.0.0/js/elm-websockets.js) into the browser assets. Load the runtime and compiled Elm application, initialize Elm, and then initialize the runtime:
 
 ```html
 <script src="elm-websockets.js"></script>
