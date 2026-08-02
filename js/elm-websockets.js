@@ -131,7 +131,13 @@ ElmWebsockets = (function() {
           typeof FileReader === "function" &&
           typeof FileReader.prototype.readAsBinaryString === "function"
         ) {
-          var reader = new FileReader();
+          var reader;
+          try {
+            reader = new FileReader();
+          } catch (error) {
+            onError(error);
+            return;
+          }
           reader.onload = function() {
             if (typeof reader.result === "string") {
               onLoad(reader.result);
@@ -158,7 +164,14 @@ ElmWebsockets = (function() {
           return;
         }
 
-        blob.arrayBuffer().then(
+        var bufferPromise;
+        try {
+          bufferPromise = blob.arrayBuffer();
+        } catch (error) {
+          onError(error);
+          return;
+        }
+        bufferPromise.then(
           function(buffer) {
             var byteString;
             try {
