@@ -73,4 +73,6 @@ config =
 
 The manager does not implement heartbeats. When your application detects a missing heartbeat, `Connection.fail "Heartbeat missing" model.connection` closes the current socket and schedules a replacement. It neither queues outgoing messages nor replays missed traffic.
 
+For JSON protocols, use `WebsocketSimple.Connection.Json.update` with your decoder and `Json.send` with your encoder. It uses the same connection model and actions. Incoming text becomes `Received value` or `PayloadDecodeFailure text error`; binary frames pass through unchanged. Decode failures do not disconnect automatically; the application can call `Connection.fail` if needed.
+
 Run `./check.sh` in the Nix development shell to check documentation, tests, and both examples.
