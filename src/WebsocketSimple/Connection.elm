@@ -11,39 +11,72 @@ Retries use exponential backoff: one second, two seconds, four seconds, up to
 one minute between attempts. There is no attempt limit. An established connection
 resets the backoff.
 
-Using the application-owned ports described in `WebsocketSimple`:
+Using the application-owned ports described in `WebsocketSimple`, this example
+counts palindromes returned by an echo server:
 
     import WebsocketPorts as Ports
+    import WebsocketSimple as Ws
     import WebsocketSimple.Connection as Connection
 
     type alias Model =
-        Connection.Model
+        { connection : Connection.Model
+        , palindromes : Int
+        }
 
     type Msg
         = ConnectionMsg Connection.Msg
+        | SendMessage String
 
     init : () -> ( Model, Cmd Msg )
     init _ =
         let
-            ( model, actions ) =
-                Connection.init (Connection.config "wss://example.com/socket")
+            ( connection, actions ) =
+                Connection.init (Connection.config "wss://example.com/echo")
         in
-        ( model, Connection.perform Ports.wsCmd ConnectionMsg actions )
+        ( { connection = connection, palindromes = 0 }
+        , Connection.perform Ports.wsCmd ConnectionMsg actions
+        )
 
     update : Msg -> Model -> ( Model, Cmd Msg )
-    update (ConnectionMsg msg) model =
-        let
-            ( next, actions, _ ) =
-                Connection.update msg model
-        in
-        ( next, Connection.perform Ports.wsCmd ConnectionMsg actions )
+    update msg model =
+        case msg of
+            ConnectionMsg event ->
+                let
+                    ( connection, actions, incoming ) =
+                        Connection.update event model.connection
+
+                    palindromes =
+                        case incoming of
+                            Just (Connection.Text body) ->
+                                if body == String.reverse body then
+                                    model.palindromes + 1
+
+                                else
+                                    model.palindromes
+
+                            _ ->
+                                model.palindromes
+                in
+                ( { model | connection = connection, palindromes = palindromes }
+                , Connection.perform Ports.wsCmd ConnectionMsg actions
+                )
+
+            SendMessage body ->
+                ( model
+                , case Connection.get model.connection of
+                    Just handle ->
+                        Ws.sendWithHandle Ports.wsCmd handle (Ws.Transmit body)
+
+                    Nothing ->
+                        Cmd.none
+                )
 
     subscriptions : Model -> Sub Msg
     subscriptions _ =
         Connection.subscribe Ports.wsMsg |> Sub.map ConnectionMsg
 
-The third result of `update` carries application events. Use `get` to obtain a
-connected handle for sending through `WebsocketSimple`.
+`SendMessage "racecar"` sends text when connected. Each palindromic reply
+increments `palindromes`.
 
 
 # Configuration
