@@ -54,7 +54,7 @@ See the [`WebsocketSimple` package documentation](https://package.elm-lang.org/p
 
 `WebsocketSimple.Connection` keeps a connection established using [elm-again](https://package.elm-lang.org/packages/mbr/elm-again/latest/). It retries immediately, then indefinitely with exponential delays from 250 milliseconds up to one minute. Successful connections reset the backoff.
 
-Start with `Connection.config url`, then call `Connection.init`. Feed socket and retry messages through `Connection.update`, and execute the returned action with `Connection.perform`. `Connection.get` returns the connected handle for sending messages. The [managed example](example/src/Managed.elm) shows the complete wiring.
+Start with `Connection.config url`, then call `Connection.init`. Feed socket and retry messages through `Connection.update`, and execute the returned action with `Connection.perform`. Send messages with `Connection.send` or `Connection.sendBinary`; disconnected sends are discarded, without buffering or replay. The [managed example](example/src/Managed.elm) shows the complete wiring.
 
 Application events are `Established` (with the negotiated subprotocol), `Text`, `Binary`, and `Error` for errors that do not trigger retries. The manager handles disconnects and retry failures internally; inspect them through `Connection.state`.
 

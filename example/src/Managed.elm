@@ -69,12 +69,7 @@ update msg model =
 
         SendMessage ->
             ( model
-            , case Connection.get model.connection of
-                Just handle ->
-                    Ws.sendWithHandle Ports.wsCmd handle (Ws.Transmit "Hello from the managed connection")
-
-                Nothing ->
-                    Cmd.none
+            , Connection.send Ports.wsCmd "Hello from the managed connection" model.connection
             )
 
         MissedHeartbeat ->

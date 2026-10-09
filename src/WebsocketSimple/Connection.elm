@@ -2,7 +2,7 @@ module WebsocketSimple.Connection exposing
     ( Config, config, withSchedule, withLimit, withHandle, withProtocols
     , Model, Msg, Event(..), Action(..), Failure(..)
     , init, update, fail, state, get
-    , receive, subscribe, perform
+    , receive, subscribe, perform, send, sendBinary
     )
 
 {-| Keep a WebSocket connected, retrying when the connection is lost.
@@ -15,7 +15,6 @@ Using the application-owned ports described in `WebsocketSimple`, this example
 replies to server-sent text with its reverse and counts palindromic inputs:
 
     import WebsocketPorts as Ports
-    import WebsocketSimple as Ws
     import WebsocketSimple.Connection as Connection
 
     type alias Model =
@@ -79,12 +78,7 @@ replies to server-sent text with its reverse and counts palindromic inputs:
                             model
                 in
                 ( next
-                , case Connection.get model.connection of
-                    Just handle ->
-                        Ws.sendWithHandle Ports.wsCmd handle (Ws.Transmit reversed)
-
-                    Nothing ->
-                        Cmd.none
+                , Connection.send Ports.wsCmd reversed model.connection
                 )
 
             _ ->
@@ -111,7 +105,7 @@ increments `palindromes`.
 
 # Integration
 
-@docs receive, subscribe, perform
+@docs receive, subscribe, perform, send, sendBinary
 
 -}
 
@@ -378,6 +372,33 @@ state (Model model) =
 get : Model -> Maybe Ws.Handle
 get (Model model) =
     Remote.get model.remote
+
+
+{-| Send text through the connected socket. Disconnected sends are discarded,
+not buffered or replayed. Delivery is best-effort.
+-}
+send : Ws.CommandPort msg -> String -> Model -> Cmd msg
+send commandPort body =
+    transmit commandPort (Ws.Transmit body)
+
+
+{-| Send binary data with the same best-effort behavior as `send`.
+-}
+sendBinary : Ws.CommandPort msg -> Bytes -> Model -> Cmd msg
+sendBinary commandPort body =
+    transmit commandPort (Ws.TransmitBinary body)
+
+
+{-| Transmit only through an established connection, without retaining data.
+-}
+transmit : Ws.CommandPort msg -> Ws.Cmd -> Model -> Cmd msg
+transmit commandPort command model =
+    case get model of
+        Just handle ->
+            Ws.sendWithHandle commandPort handle command
+
+        Nothing ->
+            Cmd.none
 
 
 {-| Name the current attempt independently of its retry count.
