@@ -1,5 +1,5 @@
 #!/bin/sh
-# Check formatting, API documentation, connection behavior, and examples.
+# Check formatting, API documentation, connection behavior, and the example.
 set -eu
 
 cd "$(dirname "$0")"
