@@ -59,8 +59,8 @@ tests =
                                     ( waiting, Close _ (Just ( _, oldRetry )) ) ->
                                         case Connection.update oldRetry waiting of
                                             ( retrying, Open second _ _, _ ) ->
-                                                case Connection.fail "retry failed" retrying of
-                                                    ( exhausted, Close _ Nothing ) ->
+                                                case Connection.update (Connection.receive ( second, Ws.Disconnected closed )) retrying of
+                                                    ( exhausted, Close _ Nothing, Nothing ) ->
                                                         [ { name = "connecting", model = initial, handle = first, active = True }
                                                         , { name = "connected", model = connected, handle = first, active = True }
                                                         , { name = "backoff", model = waiting, handle = first, active = False }
@@ -71,7 +71,7 @@ tests =
                                                             |> (\checks -> Expect.all checks ())
 
                                                     _ ->
-                                                        Expect.fail "expected the second caller failure to exhaust the policy"
+                                                        Expect.fail "expected the failed retry to exhaust the policy"
 
                                             _ ->
                                                 Expect.fail "expected an ordinary retry"
@@ -111,8 +111,8 @@ checkRestart reuse oldRetry scenario =
     in
     case opening of
         Just ( handle, url, protocols ) ->
-            case Connection.fail "new failure" restarted of
-                ( waiting, Close closing (Just ( delay, retry )) ) ->
+            case Connection.update (Connection.receive ( handle, Ws.Disconnected closed )) restarted of
+                ( waiting, Close closing (Just ( delay, retry )), Nothing ) ->
                     let
                         ( afterStale, staleAction, staleEvent ) =
                             Connection.update oldRetry waiting
@@ -121,13 +121,15 @@ checkRestart reuse oldRetry scenario =
                             Connection.fail "duplicate failure" afterStale
                     in
                     Expect.all
-                        [ \_ -> Expect.equal reuse (scenario.handle == handle)
+                        [ \_ -> checkCallerFailure scenario.model
+                        , \_ -> checkCallerFailure restarted
+                        , \_ -> Expect.equal reuse (scenario.handle == handle)
                         , \_ -> Expect.equal ( "wss://example.com/restart", [ "example.v1" ] ) ( url, protocols )
                         , \_ -> Expect.equal Remote.Attempting (Connection.state restarted)
                         , \_ -> Expect.equal Nothing (Connection.get restarted)
                         , \_ -> Expect.equal handle closing
                         , \_ -> Expect.equal 1000 delay
-                        , \_ -> Expect.equal (Remote.WaitingForRetry { attempts = 1, lastError = Connection.ApplicationError "new failure" }) (Connection.state waiting)
+                        , \_ -> Expect.equal (Remote.WaitingForRetry { attempts = 1, lastError = Connection.Closed closed }) (Connection.state waiting)
                         , \_ -> Expect.equal None staleAction
                         , \_ -> Expect.equal Nothing staleEvent
                         , \_ -> Expect.equal (Connection.state waiting) (Connection.state afterStale)
@@ -160,6 +162,31 @@ checkRestart reuse oldRetry scenario =
             Expect.fail ("expected immediate open or replacement from " ++ scenario.name)
 
 
+{-| Caller failures only retire established sockets; all other states stay intact.
+-}
+checkCallerFailure : Connection.Model -> Expect.Expectation
+checkCallerFailure model =
+    let
+        ( next, action ) =
+            Connection.fail "Update sequence gap" model
+    in
+    case Connection.state model of
+        Remote.Successful handle ->
+            case action of
+                Close closing (Just ( delay, _ )) ->
+                    Expect.equal
+                        ( handle, 1000, Remote.WaitingForRetry { attempts = 1, lastError = Connection.ApplicationError "Update sequence gap" } )
+                        ( closing, delay, Connection.state next )
+
+                _ ->
+                    Expect.fail "expected an established connection to fail and schedule a retry"
+
+        _ ->
+            Expect.equal
+                ( Connection.state model, Connection.get model, None )
+                ( Connection.state next, Connection.get next, action )
+
+
 {-| A restarted sequence still respects its configured limit and terminal state.
 -}
 checkLimit : Connection.Msg -> Connection.Model -> Expect.Expectation
@@ -167,15 +194,15 @@ checkLimit retry model =
     case Connection.update retry model of
         ( attempting, Open handle _ _, Nothing ) ->
             let
-                ( exhausted, action ) =
-                    Connection.fail "second failure" attempting
+                ( exhausted, action, _ ) =
+                    Connection.update (Connection.receive ( handle, Ws.Disconnected closed )) attempting
 
                 ( unchanged, duplicateAction ) =
                     Connection.fail "ignored" exhausted
             in
             Expect.all
                 [ \_ -> Expect.equal (Close handle Nothing) action
-                , \_ -> Expect.equal (Remote.Failed (Connection.ApplicationError "second failure")) (Connection.state exhausted)
+                , \_ -> Expect.equal (Remote.Failed (Connection.Closed closed)) (Connection.state exhausted)
                 , \_ -> Expect.equal None duplicateAction
                 , \_ -> Expect.equal (Connection.state exhausted) (Connection.state unchanged)
                 ]

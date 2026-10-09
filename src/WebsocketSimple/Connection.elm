@@ -130,8 +130,9 @@ there is no buffering or replay.
 Call `fail` when your application determines that the current connection is unusable:
 `Connection.fail "Update sequence gap" model.connection`. This records an
 `ApplicationError`, closes the socket, and follows the configured retry schedule
-and attempt limit. It works while connecting or connected; repeated calls while
-waiting to retry or after exhaustion do nothing.
+and attempt limit. It only affects an established connection; calls while connecting,
+retrying, waiting, or exhausted do nothing. Transport failures during connection
+attempts still trigger the normal retry behavior.
 
 Use `reconnect` for a "Reconnect now" button. It replaces an active connection or
 skips a pending backoff, starting a fresh attempt immediately. It also works after
@@ -389,13 +390,18 @@ withoutEvent ( model, action ) =
     ( model, action, Nothing )
 
 
-{-| Fail the current attempt or connection, recording an `ApplicationError` and
-closing the socket. Retries follow the configured schedule and attempt limit.
-Repeated failures while waiting to retry or after exhaustion do nothing.
+{-| Fail an established connection, recording an `ApplicationError` and closing
+the socket. Retries follow the configured schedule and attempt limit. Calls in
+any other state do nothing; use `reconnect` to replace a pending attempt.
 -}
 fail : String -> Model -> ( Model, Action )
-fail reason =
-    failed (ApplicationError reason)
+fail reason model =
+    case state model of
+        Remote.Successful _ ->
+            failed (ApplicationError reason) model
+
+        _ ->
+            ( model, None )
 
 
 {-| Start a fresh attempt immediately, replacing any active connection or skipping

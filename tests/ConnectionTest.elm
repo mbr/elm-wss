@@ -25,7 +25,7 @@ tests =
                     ( initial, action ) =
                         Connection.init (Connection.config "wss://example.com/socket")
                 in
-                case failures False 12 initial of
+                case failures False 12 ( initial, action ) of
                     Ok ( delays, attempting, handle ) ->
                         let
                             ( connected, connectedAction, connectedEvent ) =
@@ -102,8 +102,8 @@ tests =
                                             ( staleSocket, staleAction, staleEvent ) =
                                                 incoming first (Ws.Text "late message") attempting
                                         in
-                                        case Connection.fail "could not connect" staleSocket of
-                                            ( waitingAgain, Close _ (Just ( delay, nextRetry )) ) ->
+                                        case incoming second (Ws.Disconnected closed) staleSocket of
+                                            ( waitingAgain, Close _ (Just ( delay, nextRetry )), Nothing ) ->
                                                 let
                                                     ( staleTimer, timerAction, _ ) =
                                                         Connection.update retry waitingAgain
@@ -207,17 +207,17 @@ tests =
                 in
                 case ( Connection.init config, Connection.init (Connection.withHandle (Ws.handle "other") config) ) of
                     ( ( initial, Open first _ _ ), ( _, Open other _ _ ) ) ->
-                        case Connection.fail "initial failure" initial of
-                            ( waiting, Close _ (Just ( _, oldRetry )) ) ->
+                        case incoming first (Ws.Disconnected closed) initial of
+                            ( waiting, Close _ (Just ( _, oldRetry )), Nothing ) ->
                                 let
-                                    ( retrying, _, _ ) =
+                                    ( retrying, retryAction, _ ) =
                                         Connection.update oldRetry waiting
                                 in
-                                case failures True 2 retrying of
+                                case failures True 2 ( retrying, retryAction ) of
                                     Ok ( delays, next, handle ) ->
                                         let
-                                            ( waitingAgain, _ ) =
-                                                Connection.fail "later failure" next
+                                            ( waitingAgain, _, _ ) =
+                                                incoming handle (Ws.Disconnected closed) next
 
                                             ( unchanged, staleAction, staleEvent ) =
                                                 Connection.update oldRetry waitingAgain
@@ -297,24 +297,29 @@ incoming handle event =
 
 {-| Drive failed attempts, checking handle reuse and collecting their delays.
 -}
-failures : Bool -> Int -> Connection.Model -> Result String ( List Float, Connection.Model, Ws.Handle )
-failures reuseHandle remaining model =
-    case Connection.fail "unavailable" model of
-        ( waiting, Close old (Just ( delay, retry )) ) ->
-            case Connection.update retry waiting of
-                ( next, Open handle _ _, Nothing ) ->
-                    if (old == handle) /= reuseHandle then
-                        Err "a retry did not follow the configured handle reuse policy"
+failures : Bool -> Int -> ( Connection.Model, Action ) -> Result String ( List Float, Connection.Model, Ws.Handle )
+failures reuseHandle remaining ( model, action ) =
+    case action of
+        Open old _ _ ->
+            case incoming old (Ws.Disconnected closed) model of
+                ( waiting, Close _ (Just ( delay, retry )), Nothing ) ->
+                    case Connection.update retry waiting of
+                        ( next, (Open handle _ _) as nextAction, Nothing ) ->
+                            if (old == handle) /= reuseHandle then
+                                Err "a retry did not follow the configured handle reuse policy"
 
-                    else if remaining == 1 then
-                        Ok ( [ delay ], next, handle )
+                            else if remaining == 1 then
+                                Ok ( [ delay ], next, handle )
 
-                    else
-                        failures reuseHandle (remaining - 1) next
-                            |> Result.map (\( delays, final, last ) -> ( delay :: delays, final, last ))
+                            else
+                                failures reuseHandle (remaining - 1) ( next, nextAction )
+                                    |> Result.map (\( delays, final, last ) -> ( delay :: delays, final, last ))
+
+                        _ ->
+                            Err "expected each retry message to open exactly one socket"
 
                 _ ->
-                    Err "expected each retry message to open exactly one socket"
+                    Err "expected each failure to close the socket and schedule one retry"
 
         _ ->
-            Err "expected each failure to close the socket and schedule one retry"
+            Err "expected an opening socket to fail"
