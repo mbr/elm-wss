@@ -1,3 +1,6 @@
 #!/bin/sh
+# Build both WebSocket examples from the local package sources.
+set -eu
 
-exec elm make --output=app.js src/Main.elm
+cd "$(dirname "$0")"
+exec elm make --output=app.js src/Main.elm src/Managed.elm

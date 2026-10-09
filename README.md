@@ -49,3 +49,26 @@ subscriptions _ =
 ```
 
 See the [`WebsocketSimple` package documentation](https://package.elm-lang.org/packages/mbr/elm-wss/latest/WebsocketSimple) for installation, multiple connections, close details, and typed JSON messages.
+
+## Maintained connections
+
+`WebsocketSimple.Connection` keeps a connection established using [elm-again](https://package.elm-lang.org/packages/mbr/elm-again/latest/). It retries indefinitely with exponential delays from one second up to one minute. Successful connections reset the backoff.
+
+Start with `Connection.new url`, then call `Connection.init`. Feed socket and retry messages through `Connection.update`, and execute the returned actions with `Connection.perform`. `Connection.get` returns the connected handle for sending messages. The [managed example](example/src/Managed.elm) shows the complete wiring.
+
+To customize retries:
+
+```elm
+import Again.Policy exposing (AttemptLimit(..))
+import Again.Schedule exposing (Schedule(..))
+import WebsocketSimple.Connection as Connection
+
+config =
+    Connection.new "wss://example.com/socket"
+        |> Connection.withSchedule (Periodic { delay = 5000 })
+        |> Connection.withLimit (MaxAttempts 10)
+```
+
+The manager does not implement heartbeats. When your application detects a missing heartbeat, `Connection.fail "Heartbeat missing" model.connection` closes the current socket and schedules a replacement. It neither queues outgoing messages nor replays missed traffic.
+
+Run `./check.sh` in the Nix development shell to check documentation, tests, and both examples.

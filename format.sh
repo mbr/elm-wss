@@ -6,11 +6,11 @@ cd "$(dirname "$0")"
 case "${1:-}" in
     "")
         nixfmt flake.nix
-        elm-format --yes src example/src/Main.elm example/src/WebsocketPorts.elm
+        elm-format --yes src tests example/src
         ;;
     --check)
         nixfmt --check flake.nix
-        elm-format --validate src example/src/Main.elm example/src/WebsocketPorts.elm
+        elm-format --validate src tests example/src
         ;;
     *)
         echo "usage: $0 [--check]" >&2
