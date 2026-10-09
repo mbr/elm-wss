@@ -52,29 +52,4 @@ See the [`WebsocketSimple` package documentation](https://package.elm-lang.org/p
 
 ## Maintained connections
 
-`WebsocketSimple.Connection` keeps a connection established using [elm-again](https://package.elm-lang.org/packages/mbr/elm-again/latest/). It retries immediately, then indefinitely with exponential delays from 250 milliseconds up to one minute. Successful connections reset the backoff.
-
-Start with `Connection.config url`, then call `Connection.init`. Feed socket and retry messages through `Connection.update`, and execute the returned action with `Connection.perform`. Send messages with `Connection.send` or `Connection.sendBinary`; disconnected sends are discarded, without buffering or replay. The [managed example](example/src/Managed.elm) shows the complete wiring.
-
-Application events are `Established` (with the negotiated subprotocol), `Text`, `Binary`, and `Error` for errors that do not trigger retries. The manager handles disconnects and retry failures internally; inspect them through `Connection.state`.
-
-To customize retries:
-
-```elm
-import Again.Policy exposing (AttemptLimit(..))
-import Again.Schedule exposing (Schedule(..))
-import WebsocketSimple.Connection as Connection
-
-config =
-    Connection.config "wss://example.com/socket"
-        |> Connection.withSchedule (Periodic { delay = 5000 })
-        |> Connection.withLimit (MaxAttempts 10)
-```
-
-Enable `Connection.withServerTimeout 45000` to reconnect after 45 seconds without incoming text or binary data on an established connection. Checks are disabled by default. A server can send empty binary frames as heartbeats; applications can discard them, including through the JSON adapter. Leave room between the heartbeat interval and timeout for network and scheduling delays. Browser-managed protocol ping/pong is not visible to Elm and does not reset this timeout.
-
-Use `Connection.fail "Update sequence gap" model.connection` when your application determines that an established connection is unusable. It closes the socket and follows the retry policy. No outgoing messages are buffered or replayed.
-
-For JSON protocols, use `WebsocketSimple.Connection.Json.update` with your decoder and `Json.send` with your encoder. It uses the same connection model and actions. Incoming text becomes `Received value` or `PayloadDecodeFailure text error`; binary frames pass through unchanged. Decode failures do not disconnect automatically; the application can call `Connection.fail` if needed.
-
-Run `./check.sh` in the Nix development shell to check documentation, tests, and both examples.
+Keep a WebSocket connected with automatic reconnection, configurable retry backoff and limits, optional server-liveness checks, and typed JSON support. See the [`Connection` module](src/WebsocketSimple/Connection.elm) for configuration and examples.
