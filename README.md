@@ -52,7 +52,7 @@ See the [`WebsocketSimple` package documentation](https://package.elm-lang.org/p
 
 ## Maintained connections
 
-`WebsocketSimple.Connection` keeps a connection established using [elm-again](https://package.elm-lang.org/packages/mbr/elm-again/latest/). It retries indefinitely with exponential delays from one second up to one minute. Successful connections reset the backoff.
+`WebsocketSimple.Connection` keeps a connection established using [elm-again](https://package.elm-lang.org/packages/mbr/elm-again/latest/). It retries immediately, then indefinitely with exponential delays from 250 milliseconds up to one minute. Successful connections reset the backoff.
 
 Start with `Connection.config url`, then call `Connection.init`. Feed socket and retry messages through `Connection.update`, and execute the returned action with `Connection.perform`. `Connection.get` returns the connected handle for sending messages. The [managed example](example/src/Managed.elm) shows the complete wiring.
 

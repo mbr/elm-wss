@@ -25,7 +25,7 @@ tests =
                     ( initial, action ) =
                         Connection.init (Connection.config "wss://example.com/socket")
                 in
-                case failures 10 initial of
+                case failures 12 initial of
                     Ok ( delays, attempting, handle ) ->
                         let
                             ( connected, connectedAction, connectedEvent ) =
@@ -52,7 +52,7 @@ tests =
 
                                             _ ->
                                                 Expect.fail "expected one initial open"
-                                    , \_ -> Expect.equal [ 1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000, 60000, 60000 ] delays
+                                    , \_ -> Expect.equal [ 0, 250, 500, 1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000, 60000 ] delays
                                     , \_ -> Expect.equal (Just handle) (Connection.get connected)
                                     , \_ -> Expect.equal (Just (Connection.Established (Just "echo.v1"))) connectedEvent
                                     , \_ -> Expect.equal None connectedAction
@@ -67,7 +67,7 @@ tests =
                                                 Expect.fail "expected the binary payload to reach the application"
                                     , \_ -> Expect.equal None binaryAction
                                     , \_ -> Expect.equal handle closing
-                                    , \_ -> Expect.equal 1000 delay
+                                    , \_ -> Expect.equal 0 delay
                                     , \_ -> Expect.equal Nothing event
                                     , \_ -> Expect.equal (Remote.WaitingForRetry { attempts = 1, lastError = Connection.Closed closed }) (Connection.state waiting)
                                     , \_ -> Expect.equal Nothing (Connection.get waiting)
@@ -123,7 +123,7 @@ tests =
                                                             , \_ -> Expect.notEqual first second
                                                             , \_ -> Expect.equal None staleAction
                                                             , \_ -> Expect.equal Nothing staleEvent
-                                                            , \_ -> Expect.equal 2000 delay
+                                                            , \_ -> Expect.equal 250 delay
                                                             , \_ -> Expect.equal None timerAction
                                                             , \_ -> Expect.equal (Connection.state waitingAgain) (Connection.state staleTimer)
                                                             , \_ -> Expect.notEqual second third

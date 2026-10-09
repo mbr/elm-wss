@@ -7,9 +7,9 @@ module WebsocketSimple.Connection exposing
 
 {-| Keep a WebSocket connected, retrying when the connection is lost.
 
-Retries use exponential backoff: one second, two seconds, four seconds, up to
-one minute between attempts. There is no attempt limit. An established connection
-resets the backoff.
+Retry immediately, then use exponential backoff: 250 milliseconds, 500 milliseconds,
+one second, up to one minute between attempts. There is no attempt limit.
+An established connection resets the backoff.
 
 Using the application-owned ports described in `WebsocketSimple`, this example
 replies to server-sent text with its reverse and counts palindromic inputs:
@@ -149,11 +149,13 @@ config url =
         , namespace = Ws.handle "default"
         , policy =
             Policy.unlimited
-                (ExponentialBackoff
-                    { initialDelay = 1000
-                    , multiplier = 2
-                    , maxDelay = 60000
-                    }
+                (ImmediatelyThen
+                    (ExponentialBackoff
+                        { initialDelay = 250
+                        , multiplier = 2
+                        , maxDelay = 60000
+                        }
+                    )
                 )
         }
 
