@@ -25,6 +25,7 @@ replies to server-sent text with its reverse and counts palindromic inputs:
 
     type Msg
         = ConnectionMsg Connection.Msg
+        | OtherMessage
 
     init : () -> ( Model, Cmd Msg )
     init _ =
@@ -37,25 +38,30 @@ replies to server-sent text with its reverse and counts palindromic inputs:
         )
 
     update : Msg -> Model -> ( Model, Cmd Msg )
-    update (ConnectionMsg msg) model =
-        let
-            ( connection, actions, incoming ) =
-                Connection.update msg model.connection
+    update msg model =
+        case msg of
+            ConnectionMsg connectionMsg ->
+                let
+                    ( connection, actions, incoming ) =
+                        Connection.update connectionMsg model.connection
 
-            updated =
-                { model | connection = connection }
+                    updated =
+                        { model | connection = connection }
 
-            ( next, command ) =
-                case incoming of
-                    Just event ->
-                        handleEvent event updated
+                    ( next, command ) =
+                        case incoming of
+                            Just event ->
+                                handleEvent event updated
 
-                    Nothing ->
-                        ( updated, Cmd.none )
-        in
-        ( next
-        , Cmd.batch [ Connection.perform Ports.wsCmd ConnectionMsg actions, command ]
-        )
+                            Nothing ->
+                                ( updated, Cmd.none )
+                in
+                ( next
+                , Cmd.batch [ Connection.perform Ports.wsCmd ConnectionMsg actions, command ]
+                )
+
+            OtherMessage ->
+                ( model, Cmd.none )
 
     handleEvent : Connection.Event -> Model -> ( Model, Cmd Msg )
     handleEvent event model =
