@@ -25,7 +25,7 @@ tests =
                     ( initial, action ) =
                         Connection.init (Connection.config "wss://example.com/socket")
                 in
-                case failures 12 initial of
+                case failures False 12 initial of
                     Ok ( delays, attempting, handle ) ->
                         let
                             ( connected, connectedAction, connectedEvent ) =
@@ -198,6 +198,53 @@ tests =
 
                     _ ->
                         Expect.fail "expected two independently named sockets"
+        , test "handle reuse keeps socket identity stable without reusing retry identities" <|
+            \_ ->
+                let
+                    config =
+                        Connection.config "wss://example.com/socket"
+                            |> Connection.withHandleReuse True
+                in
+                case ( Connection.init config, Connection.init (Connection.withHandle (Ws.handle "other") config) ) of
+                    ( ( initial, Open first _ _ ), ( _, Open other _ _ ) ) ->
+                        case Connection.fail "initial failure" initial of
+                            ( waiting, Close _ (Just ( _, oldRetry )) ) ->
+                                let
+                                    ( retrying, _, _ ) =
+                                        Connection.update oldRetry waiting
+                                in
+                                case failures True 2 retrying of
+                                    Ok ( delays, next, handle ) ->
+                                        let
+                                            ( waitingAgain, _ ) =
+                                                Connection.fail "later failure" next
+
+                                            ( unchanged, staleAction, staleEvent ) =
+                                                Connection.update oldRetry waitingAgain
+
+                                            ( connected, _, established ) =
+                                                incoming handle (Ws.Connected Nothing) next
+                                        in
+                                        Expect.all
+                                            [ \_ -> Expect.equal first handle
+                                            , \_ -> Expect.notEqual first other
+                                            , \_ -> Expect.equal [ 250, 500 ] delays
+                                            , \_ -> Expect.equal None staleAction
+                                            , \_ -> Expect.equal Nothing staleEvent
+                                            , \_ -> Expect.equal (Connection.state waitingAgain) (Connection.state unchanged)
+                                            , \_ -> Expect.equal (Just first) (Connection.get connected)
+                                            , \_ -> Expect.equal (Just (Connection.Established Nothing)) established
+                                            ]
+                                            ()
+
+                                    Err error ->
+                                        Expect.fail error
+
+                            _ ->
+                                Expect.fail "expected an initial retry"
+
+                    _ ->
+                        Expect.fail "expected independently named sockets"
         , test "browser failures reconnect but other transport errors remain application events" <|
             \_ ->
                 case Connection.init (Connection.config "wss://example.com/socket") of
@@ -248,22 +295,22 @@ incoming handle event =
     Connection.update (Connection.receive ( handle, event ))
 
 
-{-| Drive successive failed attempts and collect their scheduled delays.
+{-| Drive failed attempts, checking handle reuse and collecting their delays.
 -}
-failures : Int -> Connection.Model -> Result String ( List Float, Connection.Model, Ws.Handle )
-failures remaining model =
+failures : Bool -> Int -> Connection.Model -> Result String ( List Float, Connection.Model, Ws.Handle )
+failures reuseHandle remaining model =
     case Connection.fail "unavailable" model of
         ( waiting, Close old (Just ( delay, retry )) ) ->
             case Connection.update retry waiting of
                 ( next, Open handle _ _, Nothing ) ->
-                    if old == handle then
-                        Err "a retry reused the previous attempt's handle"
+                    if (old == handle) /= reuseHandle then
+                        Err "a retry did not follow the configured handle reuse policy"
 
                     else if remaining == 1 then
                         Ok ( [ delay ], next, handle )
 
                     else
-                        failures (remaining - 1) next
+                        failures reuseHandle (remaining - 1) next
                             |> Result.map (\( delays, final, last ) -> ( delay :: delays, final, last ))
 
                 _ ->

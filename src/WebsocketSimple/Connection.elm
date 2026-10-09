@@ -1,5 +1,5 @@
 module WebsocketSimple.Connection exposing
-    ( Config, config, withSchedule, withLimit, withHandle, withProtocols
+    ( Config, config, withSchedule, withLimit, withHandle, withHandleReuse, withProtocols
     , Model, Msg, Event(..), Action(..), Failure(..)
     , init, update, fail, state, get
     , receive, subscribe, perform, send, sendBinary
@@ -7,15 +7,17 @@ module WebsocketSimple.Connection exposing
 
 {-| A managed WebSocket connection.
 
-The `Connection` manager keeps a WebSocket connection established and reconnects when
-the connection is lost for any reason, by default with a 250 ms exponential backoff,
-reaching up to a minute of delay.
+The connection manager keeps a WebSocket connected and reconnects when it closes
+or reports a connection failure. By default, it retries immediately, then backs off
+exponentially from 250 milliseconds to a maximum delay of one minute. Retries are
+unlimited, and establishing a connection resets the backoff.
 
-It also tracks connections through a unique handle, see Delayed Replies below. Connection
-handling is removed as a concern from the user, see the following example:
+Each attempt has its own handle by default; see Delayed replies below. The manager
+handles connection lifecycle and retries so your application can focus on its
+protocol.
 
-Using the application-owned ports described in `WebsocketSimple`, we reply
-replies to server-sent text with its reverse and count palindromic inputs:
+Using the application-owned ports described in `WebsocketSimple`, this example
+replies to server-sent text with its reverse and counts palindromic inputs:
 
     import WebsocketPorts as Ports
     import WebsocketSimple.Connection as Connection
@@ -97,30 +99,35 @@ increments `palindromes`.
 
 # Delayed replies
 
-Every time a new connection is established, the `Connection` manager stores it's
-handle, and generates a fresh on for each reconnection attempt. If a reply is sent
-to a message in `update` immediately, it is guaranteed to be sent on the same
-connection.
+By default, the manager generates a fresh handle for each connection attempt. A
+reply command created while handling a received message in `update` stays bound to
+that connection: reconnecting cannot redirect it to a replacement socket. This is
+not a delivery guarantee; the socket may close before the command executes.
 
-If messages are delayed, i.e. the handling `update` returns between receiving a
-message and sending a reply, if you want the message to not be sent potentially on
-a different connection, you need to do one of two things :
+If work continues asynchronously after `update` returns, and its reply must not
+cross connections, use one of these approaches:
 
-  - TKTK
-  - TKTK
+  - Capture the handle from `get` when starting the work and compare it with `get`
+    when the result arrives. Discard the result if the handles no longer match.
+  - Handle `Established` by resetting connection-specific protocol state and
+    invalidating queued work or outstanding request IDs from the previous connection.
 
-This scheme means that state for an app is connection specific, i.e. usually none
-is retained between reconnects. For example, if your websocket sends an initial state
-followed by updates, it typically has connection state.
+These approaches are useful when your protocol has connection-specific state, such
+as an initial snapshot followed by updates. The manager does not reset application
+state itself; your application decides what to retain across reconnects.
 
-If your connections are truly stateless, you can simply ignore both these mechanisms
-and configure TKTK to disabled different handles per connection. In this case, every
-message will go out on whatever connection is available.
+If replies need not stay on their original connection, simply send using the current
+model. `withHandleReuse True` additionally lets already-created commands address a
+replacement socket by reusing the same handle across attempts. This only works if
+the replacement is open when the command executes. Handle comparisons can no longer
+distinguish attempts, though `Established` is still emitted for each successful
+connection. Calls to `send` and `sendBinary` while disconnected are still discarded;
+there is no buffering or replay.
 
 
 # Configuration
 
-@docs Config, config, withSchedule, withLimit, withHandle, withProtocols
+@docs Config, config, withSchedule, withLimit, withHandle, withHandleReuse, withProtocols
 
 
 # State and transitions
@@ -155,6 +162,7 @@ type alias Settings =
     { url : String
     , protocols : List String
     , namespace : Ws.Handle
+    , reuseHandle : Bool
     , policy : Policy
     }
 
@@ -167,6 +175,7 @@ config url =
         { url = url
         , protocols = []
         , namespace = Ws.handle "default"
+        , reuseHandle = False
         , policy =
             Policy.unlimited
                 (ImmediatelyThen
@@ -203,11 +212,20 @@ withLimit limit (Config settings) =
 
 
 {-| Give the manager its own handle namespace. Use distinct namespaces when
-maintaining multiple connections; individual attempt handles are generated within it.
+maintaining multiple connections; socket handles are generated within it.
 -}
 withHandle : Ws.Handle -> Config -> Config
 withHandle namespace (Config settings) =
     Config { settings | namespace = namespace }
+
+
+{-| Reuse one handle across attempts when enabled. The default is `False`.
+Delayed sends can then address a replacement socket, and handles no longer
+identify individual attempts. Retry messages still belong to distinct attempts.
+-}
+withHandleReuse : Bool -> Config -> Config
+withHandleReuse reuseHandle (Config settings) =
+    Config { settings | reuseHandle = reuseHandle }
 
 
 {-| Request an ordered list of WebSocket subprotocols.
@@ -279,7 +297,7 @@ init (Config settings) =
 
 
 {-| Process a socket event or retry, returning an application event when appropriate.
-Events from retired sockets and obsolete retry messages are ignored.
+Events with unrelated handles and obsolete retry messages are ignored.
 
 Socket closure, construction failure, and browser transport failure schedule
 reconnection without emitting an application event. Other errors are reported as
@@ -427,11 +445,19 @@ transmit commandPort command model =
             Cmd.none
 
 
-{-| Name the current attempt independently of its retry count.
+{-| Name the socket within its namespace, optionally reusing a reserved generation.
 -}
 currentHandle : Model -> Ws.Handle
 currentHandle (Model model) =
-    Ws.handle ("elm-wss:" ++ Ws.handleToString model.settings.namespace ++ ":" ++ String.fromInt model.generation)
+    let
+        generation =
+            if model.settings.reuseHandle then
+                0
+
+            else
+                model.generation
+    in
+    Ws.handle ("elm-wss:" ++ Ws.handleToString model.settings.namespace ++ ":" ++ String.fromInt generation)
 
 
 {-| Describe the transport operation for the current attempt.
