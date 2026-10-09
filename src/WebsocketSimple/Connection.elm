@@ -30,11 +30,11 @@ replies to server-sent text with its reverse and counts palindromic inputs:
     init : () -> ( Model, Cmd Msg )
     init _ =
         let
-            ( connection, actions ) =
+            ( connection, action ) =
                 Connection.init (Connection.config "wss://example.com/messages")
         in
         ( { connection = connection, palindromes = 0 }
-        , Connection.perform Ports.wsCmd ConnectionMsg actions
+        , Connection.perform Ports.wsCmd ConnectionMsg action
         )
 
     update : Msg -> Model -> ( Model, Cmd Msg )
@@ -42,7 +42,7 @@ replies to server-sent text with its reverse and counts palindromic inputs:
         case msg of
             ConnectionMsg connectionMsg ->
                 let
-                    ( connection, actions, incoming ) =
+                    ( connection, action, incoming ) =
                         Connection.update connectionMsg model.connection
 
                     updated =
@@ -57,7 +57,7 @@ replies to server-sent text with its reverse and counts palindromic inputs:
                                 ( updated, Cmd.none )
                 in
                 ( next
-                , Cmd.batch [ Connection.perform Ports.wsCmd ConnectionMsg actions, command ]
+                , Cmd.batch [ Connection.perform Ports.wsCmd ConnectionMsg action, command ]
                 )
 
             OtherMessage ->
@@ -224,11 +224,13 @@ type Event
     | Error Ws.TransportErrorDetails
 
 
-{-| A transport operation or a delayed retry message, interpreted by `perform`.
+{-| One connection transition's effect, interpreted by `perform`. `Close` carries
+an optional retry delay in milliseconds and the message to deliver afterwards.
 -}
 type Action
-    = Send Ws.Handle Ws.Cmd
-    | RetryAfter Float Msg
+    = None
+    | Open Ws.Handle String (List String)
+    | Close Ws.Handle (Maybe ( Float, Msg ))
 
 
 {-| The reason a connection was lost or an attempt failed.
@@ -241,7 +243,7 @@ type Failure
 
 {-| Begin the first connection attempt.
 -}
-init : Config -> ( Model, List Action )
+init : Config -> ( Model, Action )
 init (Config settings) =
     let
         model =
@@ -251,7 +253,7 @@ init (Config settings) =
                 , generation = 1
                 }
     in
-    ( model, [ open model ] )
+    ( model, open model )
 
 
 {-| Process a socket event or retry, returning an application event when appropriate.
@@ -262,7 +264,7 @@ reconnection without emitting an application event. Other errors are reported as
 `Error` without reconnecting.
 
 -}
-update : Msg -> Model -> ( Model, List Action, Maybe Event )
+update : Msg -> Model -> ( Model, Action, Maybe Event )
 update msg ((Model model) as original) =
     case msg of
         Retry generation ->
@@ -273,22 +275,22 @@ update msg ((Model model) as original) =
                             next =
                                 Model { model | remote = Remote.beginRetry model.remote, generation = model.generation + 1 }
                         in
-                        ( next, [ open next ], Nothing )
+                        ( next, open next, Nothing )
 
                     else
-                        ( original, [], Nothing )
+                        ( original, None, Nothing )
 
                 _ ->
-                    ( original, [], Nothing )
+                    ( original, None, Nothing )
 
         Socket ( handle, event ) ->
             if handle /= currentHandle original || not (active original) then
-                ( original, [], Nothing )
+                ( original, None, Nothing )
 
             else
                 case event of
                     Ws.Connected protocol ->
-                        ( Model { model | remote = Remote.succeed handle model.remote }, [], Just (Established protocol) )
+                        ( Model { model | remote = Remote.succeed handle model.remote }, None, Just (Established protocol) )
 
                     Ws.Disconnected details ->
                         failed (Closed details) original |> withoutEvent
@@ -302,33 +304,33 @@ update msg ((Model model) as original) =
                                 failed (TransportError error) original |> withoutEvent
 
                             _ ->
-                                ( original, [], Just (Error error) )
+                                ( original, None, Just (Error error) )
 
                     Ws.Text body ->
-                        ( original, [], Just (Text body) )
+                        ( original, None, Just (Text body) )
 
                     Ws.Binary body ->
-                        ( original, [], Just (Binary body) )
+                        ( original, None, Just (Binary body) )
 
 
 {-| Adapt a lifecycle transition that does not produce an application event.
 -}
-withoutEvent : ( Model, List Action ) -> ( Model, List Action, Maybe Event )
-withoutEvent ( model, actions ) =
-    ( model, actions, Nothing )
+withoutEvent : ( Model, Action ) -> ( Model, Action, Maybe Event )
+withoutEvent ( model, action ) =
+    ( model, action, Nothing )
 
 
 {-| Replace the current connection, for example after a missed application heartbeat.
 Repeated failures while waiting to retry or after exhaustion do nothing.
 -}
-fail : String -> Model -> ( Model, List Action )
+fail : String -> Model -> ( Model, Action )
 fail reason =
     failed (ApplicationError reason)
 
 
 {-| Close a failed attempt and schedule at most one retry for its generation.
 -}
-failed : Failure -> Model -> ( Model, List Action )
+failed : Failure -> Model -> ( Model, Action )
 failed error ((Model model) as original) =
     if active original then
         let
@@ -336,18 +338,12 @@ failed error ((Model model) as original) =
                 Remote.fail error model.remote
         in
         ( Model { model | remote = remote }
-        , Send (currentHandle original) (Ws.Close Nothing)
-            :: (case delay of
-                    Just milliseconds ->
-                        [ RetryAfter milliseconds (Retry model.generation) ]
-
-                    Nothing ->
-                        []
-               )
+        , Close (currentHandle original)
+            (Maybe.map (\milliseconds -> ( milliseconds, Retry model.generation )) delay)
         )
 
     else
-        ( original, [] )
+        ( original, None )
 
 
 {-| Whether this generation is still attempting or maintaining a connection.
@@ -393,7 +389,7 @@ currentHandle (Model model) =
 -}
 open : Model -> Action
 open ((Model model) as original) =
-    Send (currentHandle original) (Ws.Open model.settings.url model.settings.protocols)
+    Open (currentHandle original) model.settings.url model.settings.protocols
 
 
 {-| Forward an event from an existing handled WebSocket subscription.
@@ -410,18 +406,24 @@ subscribe eventPort =
     Ws.subscribeWithHandle eventPort |> Sub.map receive
 
 
-{-| Execute transport operations and schedule retry messages through your application.
+{-| Execute one connection action through your application.
 -}
-perform : Ws.CommandPort msg -> (Msg -> msg) -> List Action -> Cmd msg
-perform commandPort wrap actions =
-    actions
-        |> List.map
-            (\action ->
-                case action of
-                    Send handle command ->
-                        Ws.sendWithHandle commandPort handle command
+perform : Ws.CommandPort msg -> (Msg -> msg) -> Action -> Cmd msg
+perform commandPort wrap action =
+    case action of
+        None ->
+            Cmd.none
 
-                    RetryAfter milliseconds retry ->
-                        RemoteCmd.wakeAfter (wrap retry) (Just milliseconds)
-            )
-        |> Cmd.batch
+        Open handle url protocols ->
+            Ws.sendWithHandle commandPort handle (Ws.Open url protocols)
+
+        Close handle retry ->
+            Cmd.batch
+                [ Ws.sendWithHandle commandPort handle (Ws.Close Nothing)
+                , case retry of
+                    Just ( milliseconds, message ) ->
+                        RemoteCmd.wakeAfter (wrap message) (Just milliseconds)
+
+                    Nothing ->
+                        Cmd.none
+                ]

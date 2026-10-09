@@ -34,11 +34,11 @@ type Msg
 init : String -> ( Model, Cmd Msg )
 init url =
     let
-        ( connection, actions ) =
+        ( connection, action ) =
             Connection.init (Connection.config url)
     in
     ( { connection = connection, message = "" }
-    , Connection.perform Ports.wsCmd ConnectionMsg actions
+    , Connection.perform Ports.wsCmd ConnectionMsg action
     )
 
 
@@ -49,7 +49,7 @@ update msg model =
     case msg of
         ConnectionMsg event ->
             let
-                ( connection, actions, incoming ) =
+                ( connection, action, incoming ) =
                     Connection.update event model.connection
 
                 message =
@@ -64,7 +64,7 @@ update msg model =
                             model.message
             in
             ( { model | connection = connection, message = message }
-            , Connection.perform Ports.wsCmd ConnectionMsg actions
+            , Connection.perform Ports.wsCmd ConnectionMsg action
             )
 
         SendMessage ->
@@ -79,11 +79,11 @@ update msg model =
 
         MissedHeartbeat ->
             let
-                ( connection, actions ) =
+                ( connection, action ) =
                     Connection.fail "Application heartbeat missing" model.connection
             in
             ( { model | connection = connection }
-            , Connection.perform Ports.wsCmd ConnectionMsg actions
+            , Connection.perform Ports.wsCmd ConnectionMsg action
             )
 
 

@@ -22,32 +22,32 @@ tests =
         [ test "defaults keep retrying, cap delays at one minute, and reset after connecting" <|
             \_ ->
                 let
-                    ( initial, actions ) =
+                    ( initial, action ) =
                         Connection.init (Connection.config "wss://example.com/socket")
                 in
                 case failures 10 initial of
                     Ok ( delays, attempting, handle ) ->
                         let
-                            ( connected, connectedActions, connectedEvent ) =
+                            ( connected, connectedAction, connectedEvent ) =
                                 incoming handle (Ws.Connected (Just "echo.v1")) attempting
 
-                            ( receivedText, textActions, textEvent ) =
+                            ( receivedText, textAction, textEvent ) =
                                 incoming handle (Ws.Text "hello") connected
 
                             bytes =
                                 Encode.encode (Encode.sequence [ Encode.unsignedInt8 0, Encode.unsignedInt8 255 ])
 
-                            ( receivedBinary, binaryActions, binaryEvent ) =
+                            ( receivedBinary, binaryAction, binaryEvent ) =
                                 incoming handle (Ws.Binary bytes) receivedText
                         in
                         case incoming handle (Ws.Disconnected closed) receivedBinary of
-                            ( waiting, [ Send closing (Ws.Close Nothing), RetryAfter delay _ ], event ) ->
+                            ( waiting, Close closing (Just ( delay, _ )), event ) ->
                                 Expect.all
                                     [ \_ -> Expect.equal Remote.Attempting (Connection.state initial)
                                     , \_ -> Expect.equal Nothing (Connection.get initial)
                                     , \_ ->
-                                        case actions of
-                                            [ Send _ (Ws.Open url protocols) ] ->
+                                        case action of
+                                            Open _ url protocols ->
                                                 Expect.equal ( "wss://example.com/socket", [] ) ( url, protocols )
 
                                             _ ->
@@ -55,9 +55,9 @@ tests =
                                     , \_ -> Expect.equal [ 1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000, 60000, 60000 ] delays
                                     , \_ -> Expect.equal (Just handle) (Connection.get connected)
                                     , \_ -> Expect.equal (Just (Connection.Established (Just "echo.v1"))) connectedEvent
-                                    , \_ -> Expect.equal [] connectedActions
+                                    , \_ -> Expect.equal None connectedAction
                                     , \_ -> Expect.equal (Just (Connection.Text "hello")) textEvent
-                                    , \_ -> Expect.equal [] textActions
+                                    , \_ -> Expect.equal None textAction
                                     , \_ ->
                                         case binaryEvent of
                                             Just (Connection.Binary body) ->
@@ -65,7 +65,7 @@ tests =
 
                                             _ ->
                                                 Expect.fail "expected the binary payload to reach the application"
-                                    , \_ -> Expect.equal [] binaryActions
+                                    , \_ -> Expect.equal None binaryAction
                                     , \_ -> Expect.equal handle closing
                                     , \_ -> Expect.equal 1000 delay
                                     , \_ -> Expect.equal Nothing event
@@ -82,52 +82,52 @@ tests =
         , test "application failure retires the socket and obsolete retries cannot start new attempts" <|
             \_ ->
                 case Connection.init (Connection.config "wss://example.com/socket") of
-                    ( initial, [ Send first _ ] ) ->
+                    ( initial, Open first _ _ ) ->
                         let
                             ( connected, _, _ ) =
                                 incoming first (Ws.Connected Nothing) initial
                         in
                         case Connection.fail "heartbeat missing" connected of
-                            ( waiting, [ Send closing (Ws.Close Nothing), RetryAfter _ retry ] ) ->
+                            ( waiting, Close closing (Just ( _, retry )) ) ->
                                 let
-                                    ( duplicate, duplicateActions ) =
+                                    ( duplicate, duplicateAction ) =
                                         Connection.fail "heartbeat still missing" waiting
 
-                                    ( disconnected, closeActions, closeEvent ) =
+                                    ( disconnected, closeAction, closeEvent ) =
                                         incoming first (Ws.Disconnected closed) duplicate
                                 in
                                 case Connection.update retry disconnected of
-                                    ( attempting, [ Send second (Ws.Open _ _) ], _ ) ->
+                                    ( attempting, Open second _ _, _ ) ->
                                         let
-                                            ( staleSocket, staleActions, staleEvent ) =
+                                            ( staleSocket, staleAction, staleEvent ) =
                                                 incoming first (Ws.Text "late message") attempting
                                         in
                                         case Connection.fail "could not connect" staleSocket of
-                                            ( waitingAgain, [ Send _ (Ws.Close Nothing), RetryAfter delay nextRetry ] ) ->
+                                            ( waitingAgain, Close _ (Just ( delay, nextRetry )) ) ->
                                                 let
-                                                    ( staleTimer, timerActions, _ ) =
+                                                    ( staleTimer, timerAction, _ ) =
                                                         Connection.update retry waitingAgain
                                                 in
                                                 case Connection.update nextRetry staleTimer of
-                                                    ( next, [ Send third (Ws.Open _ _) ], _ ) ->
+                                                    ( next, Open third _ _, _ ) ->
                                                         let
-                                                            ( unchanged, secondWakeActions, _ ) =
+                                                            ( unchanged, secondWakeAction, _ ) =
                                                                 Connection.update nextRetry next
                                                         in
                                                         Expect.all
                                                             [ \_ -> Expect.equal first closing
                                                             , \_ -> Expect.equal (Remote.WaitingForRetry { attempts = 1, lastError = Connection.ApplicationError "heartbeat missing" }) (Connection.state waiting)
-                                                            , \_ -> Expect.equal [] duplicateActions
-                                                            , \_ -> Expect.equal [] closeActions
+                                                            , \_ -> Expect.equal None duplicateAction
+                                                            , \_ -> Expect.equal None closeAction
                                                             , \_ -> Expect.equal Nothing closeEvent
                                                             , \_ -> Expect.notEqual first second
-                                                            , \_ -> Expect.equal [] staleActions
+                                                            , \_ -> Expect.equal None staleAction
                                                             , \_ -> Expect.equal Nothing staleEvent
                                                             , \_ -> Expect.equal 2000 delay
-                                                            , \_ -> Expect.equal [] timerActions
+                                                            , \_ -> Expect.equal None timerAction
                                                             , \_ -> Expect.equal (Connection.state waitingAgain) (Connection.state staleTimer)
                                                             , \_ -> Expect.notEqual second third
-                                                            , \_ -> Expect.equal [] secondWakeActions
+                                                            , \_ -> Expect.equal None secondWakeAction
                                                             , \_ -> Expect.equal (Connection.state next) (Connection.state unchanged)
                                                             ]
                                                             ()
@@ -160,19 +160,19 @@ tests =
                         { kind = Ws.ConstructionFailure, message = "unavailable" }
                 in
                 case ( Connection.init settings, Connection.init (Connection.withHandle (Ws.handle "other") settings) ) of
-                    ( ( initial, [ Send first (Ws.Open url protocols) ] ), ( _, [ Send other _ ] ) ) ->
+                    ( ( initial, Open first url protocols ), ( _, Open other _ _ ) ) ->
                         case incoming first (Ws.TransportError error) initial of
-                            ( waiting, [ Send _ _, RetryAfter delay retry ], _ ) ->
+                            ( waiting, Close _ (Just ( delay, retry )), _ ) ->
                                 case Connection.update retry waiting of
-                                    ( attempting, [ Send second (Ws.Open retryUrl retryProtocols) ], _ ) ->
+                                    ( attempting, Open second retryUrl retryProtocols, _ ) ->
                                         let
-                                            ( exhausted, actions, event ) =
+                                            ( exhausted, action, event ) =
                                                 incoming second (Ws.TransportError error) attempting
 
-                                            ( unchanged, lateActions, _ ) =
+                                            ( unchanged, lateAction, _ ) =
                                                 Connection.update retry exhausted
 
-                                            ( _, failedActions ) =
+                                            ( _, failedAction ) =
                                                 Connection.fail "again" unchanged
                                         in
                                         Expect.all
@@ -181,12 +181,12 @@ tests =
                                             , \_ -> Expect.notEqual first other
                                             , \_ -> Expect.notEqual first second
                                             , \_ -> Expect.equal 7 delay
-                                            , \_ -> Expect.equal [ Send second (Ws.Close Nothing) ] actions
+                                            , \_ -> Expect.equal (Close second Nothing) action
                                             , \_ -> Expect.equal Nothing event
                                             , \_ -> Expect.equal (Remote.Failed (Connection.TransportError error)) (Connection.state exhausted)
                                             , \_ -> Expect.equal Nothing (Connection.get exhausted)
-                                            , \_ -> Expect.equal [] lateActions
-                                            , \_ -> Expect.equal [] failedActions
+                                            , \_ -> Expect.equal None lateAction
+                                            , \_ -> Expect.equal None failedAction
                                             ]
                                             ()
 
@@ -201,7 +201,7 @@ tests =
         , test "browser failures reconnect but other transport errors remain application events" <|
             \_ ->
                 case Connection.init (Connection.config "wss://example.com/socket") of
-                    ( initial, [ Send handle _ ] ) ->
+                    ( initial, Open handle _ _ ) ->
                         let
                             ( connected, _, _ ) =
                                 incoming handle (Ws.Connected Nothing) initial
@@ -211,17 +211,17 @@ tests =
                                     error =
                                         { kind = kind, message = "test" }
 
-                                    ( next, actions, event ) =
+                                    ( next, action, event ) =
                                         incoming handle (Ws.TransportError error) connected
                                 in
-                                Expect.equal ( Just handle, [], Just (Connection.Error error) ) ( Connection.get next, actions, event )
+                                Expect.equal ( Just handle, None, Just (Connection.Error error) ) ( Connection.get next, action, event )
                         in
                         Expect.all
                             [ \_ ->
                                 Expect.all (List.map (\kind _ -> check kind) [ Ws.SendFailure, Ws.CloseFailure, Ws.SendRejection, Ws.UnsupportedData, Ws.PortDecodingFailure ]) ()
                             , \_ ->
                                 case incoming handle (Ws.TransportError { kind = Ws.BrowserFailure, message = "lost" }) connected of
-                                    ( waiting, [ Send _ (Ws.Close Nothing), RetryAfter _ _ ], event ) ->
+                                    ( waiting, Close _ (Just _), event ) ->
                                         Expect.equal ( Nothing, Nothing ) ( Connection.get waiting, event )
 
                                     _ ->
@@ -243,7 +243,7 @@ closed =
 
 {-| Forward a socket event through the public adapter.
 -}
-incoming : Ws.Handle -> Ws.RawMsg -> Connection.Model -> ( Connection.Model, List Action, Maybe Connection.Event )
+incoming : Ws.Handle -> Ws.RawMsg -> Connection.Model -> ( Connection.Model, Action, Maybe Connection.Event )
 incoming handle event =
     Connection.update (Connection.receive ( handle, event ))
 
@@ -253,9 +253,9 @@ incoming handle event =
 failures : Int -> Connection.Model -> Result String ( List Float, Connection.Model, Ws.Handle )
 failures remaining model =
     case Connection.fail "unavailable" model of
-        ( waiting, [ Send old (Ws.Close Nothing), RetryAfter delay retry ] ) ->
+        ( waiting, Close old (Just ( delay, retry )) ) ->
             case Connection.update retry waiting of
-                ( next, [ Send handle (Ws.Open _ _) ], Nothing ) ->
+                ( next, Open handle _ _, Nothing ) ->
                     if old == handle then
                         Err "a retry reused the previous attempt's handle"
 
