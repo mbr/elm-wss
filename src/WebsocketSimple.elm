@@ -152,15 +152,6 @@ Each connection is identified by an opaque handle encoded as a string at the por
 @docs RawMsg, CloseDetails, TransportErrorKind, TransportErrorDetails, subscribe, subscribeWithHandle, errorKindToString, errorToString
 
 
-# Ping and pong
-
-Browsers automatically answer server-sent WebSocket pings with pongs. These
-protocol control frames are not exposed as events, and the browser API cannot send
-them from Elm or JavaScript. A server can use them to check its browser connection.
-To check server liveness from the application, use incoming data frames instead;
-`WebsocketSimple.Connection.withServerTimeout` provides an optional inactivity check.
-
-
 # JSON
 
 Regular subscriptions expose incoming text and binary frames as `Text String` and `Binary Bytes`. Typed subscriptions decode text frames while keeping transport errors separate from payload decoding failures. A binary frame received through a typed JSON subscription produces an `UnsupportedData` transport failure.
