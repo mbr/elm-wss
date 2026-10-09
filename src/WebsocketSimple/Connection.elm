@@ -1,7 +1,7 @@
 module WebsocketSimple.Connection exposing
     ( Config, config, withSchedule, withLimit, withHandle, withHandleReuse, withProtocols
     , Model, Msg, Event(..), Action(..), Failure(..)
-    , init, update, fail, state, get
+    , init, update, fail, reconnect, state, get
     , receive, subscribe, perform, send, sendBinary
     )
 
@@ -125,6 +125,33 @@ connection. Calls to `send` and `sendBinary` while disconnected are still discar
 there is no buffering or replay.
 
 
+# Caller-initiated dis- and reconnects
+
+Call `fail` when your application determines that the current connection is unusable:
+`Connection.fail "Server stopped responding" model.connection`. This records an
+`ApplicationError`, closes the socket, and follows the configured retry schedule
+and attempt limit. It works while connecting or connected; repeated calls while
+waiting to retry or after exhaustion do nothing.
+
+Use `reconnect` for a "Reconnect now" button. It replaces an active connection or
+skips a pending backoff, starting a fresh attempt immediately. It also works after
+exhaustion, resetting the retry count and backoff while retaining your configuration.
+Old retry callbacks cannot restart the connection again. Like automatic retries,
+it honors `withHandleReuse` and leaves application protocol state to you.
+
+Both functions return a model and an action to pass to `perform`:
+
+    reconnectNow : Model -> ( Model, Cmd Msg )
+    reconnectNow model =
+        let
+            ( connection, action ) =
+                Connection.reconnect model.connection
+        in
+        ( { model | connection = connection }
+        , Connection.perform Ports.wsCmd ConnectionMsg action
+        )
+
+
 # Configuration
 
 @docs Config, config, withSchedule, withLimit, withHandle, withHandleReuse, withProtocols
@@ -133,7 +160,7 @@ there is no buffering or replay.
 # State and transitions
 
 @docs Model, Msg, Event, Action, Failure
-@docs init, update, fail, state, get
+@docs init, update, fail, reconnect, state, get
 
 
 # Integration
@@ -266,11 +293,13 @@ type Event
 
 {-| One connection transition's effect, interpreted by `perform`. `Close` carries
 an optional retry delay in milliseconds and the message to deliver afterwards.
+`Replace` swaps the old handle's socket for a new connection without a retry delay.
 -}
 type Action
     = None
     | Open Ws.Handle String (List String)
     | Close Ws.Handle (Maybe ( Float, Msg ))
+    | Replace Ws.Handle Ws.Handle String (List String)
 
 
 {-| The reason a connection was lost or an attempt failed.
@@ -360,12 +389,32 @@ withoutEvent ( model, action ) =
     ( model, action, Nothing )
 
 
-{-| Replace the current connection, for example after a missed application heartbeat.
+{-| Fail the current attempt or connection, recording an `ApplicationError` and
+closing the socket. Retries follow the configured schedule and attempt limit.
 Repeated failures while waiting to retry or after exhaustion do nothing.
 -}
 fail : String -> Model -> ( Model, Action )
 fail reason =
     failed (ApplicationError reason)
+
+
+{-| Start a fresh attempt immediately, replacing any active connection or skipping
+its backoff. Resets the retry count, even after exhaustion, and invalidates pending
+retry callbacks. Configuration, including handle reuse, is preserved.
+-}
+reconnect : Model -> ( Model, Action )
+reconnect ((Model model) as original) =
+    let
+        next =
+            Model { model | remote = Remote.init model.settings.policy, generation = model.generation + 1 }
+    in
+    ( next
+    , if active original then
+        Replace (currentHandle original) (currentHandle next) model.settings.url model.settings.protocols
+
+      else
+        open next
+    )
 
 
 {-| Close a failed attempt and schedule at most one retry for its generation.
@@ -481,7 +530,8 @@ subscribe eventPort =
     Ws.subscribeWithHandle eventPort |> Sub.map receive
 
 
-{-| Execute one connection action through your application.
+{-| Execute one connection action through your application. A reused handle is
+replaced with a single open command, which closes the old socket in the runtime.
 -}
 perform : Ws.CommandPort msg -> (Msg -> msg) -> Action -> Cmd msg
 perform commandPort wrap action =
@@ -491,6 +541,16 @@ perform commandPort wrap action =
 
         Open handle url protocols ->
             Ws.sendWithHandle commandPort handle (Ws.Open url protocols)
+
+        Replace old handle url protocols ->
+            Cmd.batch
+                [ if old == handle then
+                    Cmd.none
+
+                  else
+                    Ws.sendWithHandle commandPort old (Ws.Close Nothing)
+                , Ws.sendWithHandle commandPort handle (Ws.Open url protocols)
+                ]
 
         Close handle retry ->
             Cmd.batch
