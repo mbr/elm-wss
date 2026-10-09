@@ -56,6 +56,8 @@ See the [`WebsocketSimple` package documentation](https://package.elm-lang.org/p
 
 Start with `Connection.new url`, then call `Connection.init`. Feed socket and retry messages through `Connection.update`, and execute the returned actions with `Connection.perform`. `Connection.get` returns the connected handle for sending messages. The [managed example](example/src/Managed.elm) shows the complete wiring.
 
+Application events are `Established` (with the negotiated subprotocol), `Text`, `Binary`, and `Error` for errors that do not trigger retries. The manager handles disconnects and retry failures internally; inspect them through `Connection.state`.
+
 To customize retries:
 
 ```elm

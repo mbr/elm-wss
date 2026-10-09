@@ -6,6 +6,8 @@ module ConnectionTest exposing (tests)
 import Again.Policy exposing (AttemptLimit(..))
 import Again.Remote as Remote
 import Again.Schedule exposing (Schedule(..))
+import Bytes.Decode as Decode
+import Bytes.Encode as Encode
 import Expect
 import Test exposing (Test, describe, test)
 import WebsocketSimple as Ws
@@ -27,12 +29,18 @@ tests =
                     Ok ( delays, attempting, handle ) ->
                         let
                             ( connected, connectedActions, connectedEvent ) =
-                                incoming handle (Ws.Connected Nothing) attempting
+                                incoming handle (Ws.Connected (Just "echo.v1")) attempting
 
-                            ( unchanged, textActions, textEvent ) =
+                            ( receivedText, textActions, textEvent ) =
                                 incoming handle (Ws.Text "hello") connected
+
+                            bytes =
+                                Encode.encode (Encode.sequence [ Encode.unsignedInt8 0, Encode.unsignedInt8 255 ])
+
+                            ( receivedBinary, binaryActions, binaryEvent ) =
+                                incoming handle (Ws.Binary bytes) receivedText
                         in
-                        case incoming handle (Ws.Disconnected closed) unchanged of
+                        case incoming handle (Ws.Disconnected closed) receivedBinary of
                             ( waiting, [ Send closing (Ws.Close Nothing), RetryAfter delay _ ], event ) ->
                                 Expect.all
                                     [ \_ -> Expect.equal Remote.Attempting (Connection.state initial)
@@ -46,13 +54,21 @@ tests =
                                                 Expect.fail "expected one initial open"
                                     , \_ -> Expect.equal [ 1000, 2000, 4000, 8000, 16000, 32000, 60000, 60000, 60000, 60000 ] delays
                                     , \_ -> Expect.equal (Just handle) (Connection.get connected)
-                                    , \_ -> Expect.equal (Just (Ws.Connected Nothing)) connectedEvent
+                                    , \_ -> Expect.equal (Just (Connection.Established (Just "echo.v1"))) connectedEvent
                                     , \_ -> Expect.equal [] connectedActions
-                                    , \_ -> Expect.equal (Just (Ws.Text "hello")) textEvent
+                                    , \_ -> Expect.equal (Just (Connection.Text "hello")) textEvent
                                     , \_ -> Expect.equal [] textActions
+                                    , \_ ->
+                                        case binaryEvent of
+                                            Just (Connection.Binary body) ->
+                                                Expect.equal (Just ( 0, 255 )) (Decode.decode (Decode.map2 Tuple.pair Decode.unsignedInt8 Decode.unsignedInt8) body)
+
+                                            _ ->
+                                                Expect.fail "expected the binary payload to reach the application"
+                                    , \_ -> Expect.equal [] binaryActions
                                     , \_ -> Expect.equal handle closing
                                     , \_ -> Expect.equal 1000 delay
-                                    , \_ -> Expect.equal (Just (Ws.Disconnected closed)) event
+                                    , \_ -> Expect.equal Nothing event
                                     , \_ -> Expect.equal (Remote.WaitingForRetry { attempts = 1, lastError = Connection.Closed closed }) (Connection.state waiting)
                                     , \_ -> Expect.equal Nothing (Connection.get waiting)
                                     ]
@@ -166,7 +182,7 @@ tests =
                                             , \_ -> Expect.notEqual first second
                                             , \_ -> Expect.equal 7 delay
                                             , \_ -> Expect.equal [ Send second (Ws.Close Nothing) ] actions
-                                            , \_ -> Expect.equal (Just (Ws.TransportError error)) event
+                                            , \_ -> Expect.equal Nothing event
                                             , \_ -> Expect.equal (Remote.Failed (Connection.TransportError error)) (Connection.state exhausted)
                                             , \_ -> Expect.equal Nothing (Connection.get exhausted)
                                             , \_ -> Expect.equal [] lateActions
@@ -193,20 +209,20 @@ tests =
                             check kind =
                                 let
                                     error =
-                                        Ws.TransportError { kind = kind, message = "test" }
+                                        { kind = kind, message = "test" }
 
                                     ( next, actions, event ) =
-                                        incoming handle error connected
+                                        incoming handle (Ws.TransportError error) connected
                                 in
-                                Expect.equal ( Just handle, [], Just error ) ( Connection.get next, actions, event )
+                                Expect.equal ( Just handle, [], Just (Connection.Error error) ) ( Connection.get next, actions, event )
                         in
                         Expect.all
                             [ \_ ->
                                 Expect.all (List.map (\kind _ -> check kind) [ Ws.SendFailure, Ws.CloseFailure, Ws.SendRejection, Ws.UnsupportedData, Ws.PortDecodingFailure ]) ()
                             , \_ ->
                                 case incoming handle (Ws.TransportError { kind = Ws.BrowserFailure, message = "lost" }) connected of
-                                    ( waiting, [ Send _ (Ws.Close Nothing), RetryAfter _ _ ], _ ) ->
-                                        Expect.equal Nothing (Connection.get waiting)
+                                    ( waiting, [ Send _ (Ws.Close Nothing), RetryAfter _ _ ], event ) ->
+                                        Expect.equal ( Nothing, Nothing ) ( Connection.get waiting, event )
 
                                     _ ->
                                         Expect.fail "expected a browser failure to reconnect"
@@ -227,7 +243,7 @@ closed =
 
 {-| Forward a socket event through the public adapter.
 -}
-incoming : Ws.Handle -> Ws.RawMsg -> Connection.Model -> ( Connection.Model, List Action, Maybe Ws.RawMsg )
+incoming : Ws.Handle -> Ws.RawMsg -> Connection.Model -> ( Connection.Model, List Action, Maybe Connection.Event )
 incoming handle event =
     Connection.update (Connection.receive ( handle, event ))
 

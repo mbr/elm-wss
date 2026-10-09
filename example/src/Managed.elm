@@ -54,8 +54,11 @@ update msg model =
 
                 message =
                     case incoming of
-                        Just (Ws.Text body) ->
+                        Just (Connection.Text body) ->
                             body
+
+                        Just (Connection.Error error) ->
+                            Ws.errorToString error
 
                         _ ->
                             model.message

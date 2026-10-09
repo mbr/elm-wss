@@ -1,6 +1,6 @@
 module WebsocketSimple.Connection exposing
     ( Config, new, withSchedule, withLimit, withHandle, withProtocols
-    , Model, Msg, Action(..), Failure(..)
+    , Model, Msg, Event(..), Action(..), Failure(..)
     , init, update, fail, state, get
     , receive, subscribe, perform
     )
@@ -21,8 +21,8 @@ with `Connection.perform Ports.wsCmd ConnectionMsg actions`, and feed the result
 messages back to `update`.
 
 Subscribe with `Connection.subscribe Ports.wsMsg |> Sub.map ConnectionMsg`.
-`update` also returns accepted socket events, so your application can handle
-messages and connection changes. See the [managed example](https://github.com/mbr/elm-wss/blob/main/example/src/Managed.elm)
+`update` returns application events for established connections, received data,
+and errors that do not trigger reconnection. See the [managed example](https://github.com/mbr/elm-wss/blob/main/example/src/Managed.elm)
 for a complete model and update function.
 
 Use `get` to obtain a connected handle for sending through `WebsocketSimple`.
@@ -37,7 +37,7 @@ connection needs replacing.
 
 # State and transitions
 
-@docs Model, Msg, Action, Failure
+@docs Model, Msg, Event, Action, Failure
 @docs init, update, fail, state, get
 
 
@@ -51,6 +51,7 @@ import Again.Policy as Policy exposing (AttemptLimit, Policy)
 import Again.Remote as Remote
 import Again.Remote.Cmd as RemoteCmd
 import Again.Schedule exposing (Schedule(..))
+import Bytes exposing (Bytes)
 import WebsocketSimple as Ws
 
 
@@ -143,6 +144,18 @@ type Msg
     | Retry Int
 
 
+{-| Application events from the managed connection. `Established` includes the
+negotiated subprotocol and lets your application initialize each new connection.
+`Error` reports errors that do not trigger reconnection; connection loss and
+retry failures are available through `state` instead.
+-}
+type Event
+    = Established (Maybe String)
+    | Text String
+    | Binary Bytes
+    | Error Ws.TransportErrorDetails
+
+
 {-| A transport operation or a delayed retry message, interpreted by `perform`.
 -}
 type Action
@@ -173,14 +186,15 @@ init (Config settings) =
     ( model, [ open model ] )
 
 
-{-| Process a socket event or retry, returning any accepted socket event for the
-application. Events from retired sockets and obsolete retry messages are ignored.
+{-| Process a socket event or retry, returning an application event when appropriate.
+Events from retired sockets and obsolete retry messages are ignored.
 
 Socket closure, construction failure, and browser transport failure schedule
-reconnection. Other errors are passed to the application without reconnecting.
+reconnection without emitting an application event. Other errors are reported as
+`Error` without reconnecting.
 
 -}
-update : Msg -> Model -> ( Model, List Action, Maybe Ws.RawMsg )
+update : Msg -> Model -> ( Model, List Action, Maybe Event )
 update msg ((Model model) as original) =
     case msg of
         Retry generation ->
@@ -204,30 +218,36 @@ update msg ((Model model) as original) =
                 ( original, [], Nothing )
 
             else
-                let
-                    ( next, actions ) =
-                        case event of
-                            Ws.Connected _ ->
-                                ( Model { model | remote = Remote.succeed handle model.remote }, [] )
+                case event of
+                    Ws.Connected protocol ->
+                        ( Model { model | remote = Remote.succeed handle model.remote }, [], Just (Established protocol) )
 
-                            Ws.Disconnected details ->
-                                failed (Closed details) original
+                    Ws.Disconnected details ->
+                        failed (Closed details) original |> withoutEvent
 
-                            Ws.TransportError error ->
-                                case error.kind of
-                                    Ws.ConstructionFailure ->
-                                        failed (TransportError error) original
+                    Ws.TransportError error ->
+                        case error.kind of
+                            Ws.ConstructionFailure ->
+                                failed (TransportError error) original |> withoutEvent
 
-                                    Ws.BrowserFailure ->
-                                        failed (TransportError error) original
-
-                                    _ ->
-                                        ( original, [] )
+                            Ws.BrowserFailure ->
+                                failed (TransportError error) original |> withoutEvent
 
                             _ ->
-                                ( original, [] )
-                in
-                ( next, actions, Just event )
+                                ( original, [], Just (Error error) )
+
+                    Ws.Text body ->
+                        ( original, [], Just (Text body) )
+
+                    Ws.Binary body ->
+                        ( original, [], Just (Binary body) )
+
+
+{-| Adapt a lifecycle transition that does not produce an application event.
+-}
+withoutEvent : ( Model, List Action ) -> ( Model, List Action, Maybe Event )
+withoutEvent ( model, actions ) =
+    ( model, actions, Nothing )
 
 
 {-| Replace the current connection, for example after a missed application heartbeat.
