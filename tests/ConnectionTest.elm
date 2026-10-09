@@ -23,7 +23,7 @@ tests =
             \_ ->
                 let
                     ( initial, actions ) =
-                        Connection.init (Connection.new "wss://example.com/socket")
+                        Connection.init (Connection.config "wss://example.com/socket")
                 in
                 case failures 10 initial of
                     Ok ( delays, attempting, handle ) ->
@@ -81,7 +81,7 @@ tests =
                         Expect.fail error
         , test "application failure retires the socket and obsolete retries cannot start new attempts" <|
             \_ ->
-                case Connection.init (Connection.new "wss://example.com/socket") of
+                case Connection.init (Connection.config "wss://example.com/socket") of
                     ( initial, [ Send first _ ] ) ->
                         let
                             ( connected, _, _ ) =
@@ -150,7 +150,7 @@ tests =
             \_ ->
                 let
                     settings =
-                        Connection.new "wss://example.com/chat"
+                        Connection.config "wss://example.com/chat"
                             |> Connection.withSchedule (Periodic { delay = 7 })
                             |> Connection.withLimit (MaxAttempts 2)
                             |> Connection.withProtocols [ "chat.v1" ]
@@ -200,7 +200,7 @@ tests =
                         Expect.fail "expected two independently named sockets"
         , test "browser failures reconnect but other transport errors remain application events" <|
             \_ ->
-                case Connection.init (Connection.new "wss://example.com/socket") of
+                case Connection.init (Connection.config "wss://example.com/socket") of
                     ( initial, [ Send handle _ ] ) ->
                         let
                             ( connected, _, _ ) =

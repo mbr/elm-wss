@@ -35,7 +35,7 @@ init : String -> ( Model, Cmd Msg )
 init url =
     let
         ( connection, actions ) =
-            Connection.init (Connection.new url)
+            Connection.init (Connection.config url)
     in
     ( { connection = connection, message = "" }
     , Connection.perform Ports.wsCmd ConnectionMsg actions

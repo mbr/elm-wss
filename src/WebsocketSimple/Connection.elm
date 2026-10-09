@@ -1,5 +1,5 @@
 module WebsocketSimple.Connection exposing
-    ( Config, new, withSchedule, withLimit, withHandle, withProtocols
+    ( Config, config, withSchedule, withLimit, withHandle, withProtocols
     , Model, Msg, Event(..), Action(..), Failure(..)
     , init, update, fail, state, get
     , receive, subscribe, perform
@@ -10,7 +10,7 @@ module WebsocketSimple.Connection exposing
     import WebsocketSimple.Connection as Connection
 
     config =
-        Connection.new "wss://example.com/socket"
+        Connection.config "wss://example.com/socket"
 
 Retries use exponential backoff: one second, two seconds, four seconds, up to
 one minute between attempts. There is no attempt limit. An established connection
@@ -32,7 +32,7 @@ connection needs replacing.
 
 # Configuration
 
-@docs Config, new, withSchedule, withLimit, withHandle, withProtocols
+@docs Config, config, withSchedule, withLimit, withHandle, withProtocols
 
 
 # State and transitions
@@ -73,8 +73,8 @@ type alias Settings =
 
 {-| Configure an indefinitely maintained connection with capped exponential backoff.
 -}
-new : String -> Config
-new url =
+config : String -> Config
+config url =
     Config
         { url = url
         , protocols = []
