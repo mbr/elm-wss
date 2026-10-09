@@ -153,29 +153,24 @@ Both functions return a model and an action to pass to `perform`:
         )
 
 
-# Server liveness
+# Connection liveness
 
-Enable an inactivity timeout with `Connection.withServerTimeout 45000`. The clock
-starts when the connection opens; every incoming text or binary frame counts as
-activity. If the server stays silent for the configured milliseconds, the manager
-records `ServerTimeout`, closes the socket, and follows its retry policy. Checks
-are disabled by default and do not time out connection attempts.
+A server can check **client liveness** by sending WebSocket protocol pings and
+waiting for pongs. Browsers reply automatically. JavaScript cannot send or observe
+these control frames, so they do not count as activity for client-side checks.
 
-The server can send periodic heartbeat messages when it has no other data to send.
-An empty binary frame works well: the application can discard `Binary` events whose
-payload has `Bytes.width` zero. The JSON adapter passes binary frames through too,
-so these heartbeats need no JSON representation. Choose a timeout longer than the
-heartbeat interval, with room for network and scheduling delays.
+A client can check **server liveness** by timing out a silent server. The server
+sends unsolicited heartbeat data frames, either periodically or only when otherwise
+idle. An empty binary frame works well: the application can discard `Binary` events
+whose payload has `Bytes.width` zero. The JSON adapter passes binary frames through
+too, so these heartbeats need no JSON representation.
 
-WebSocket protocol ping/pong is separate. Browsers automatically answer server
-pings, but JavaScript cannot send or observe those control frames. They therefore
-do not count as activity here; use application-visible data frames instead.
-
-There is one watchdog timer per established connection. Incoming data updates its
-last-activity time without restarting the timer. When it wakes, the manager either
-fails the connection or schedules the remaining time until the current deadline.
-JSON decoding failures still count as activity; outgoing messages and transport
-errors do not.
+Enable the client-side timeout with `Connection.withServerTimeout 45000`. It starts
+when the connection opens; every incoming text or binary frame counts as activity.
+If the server stays silent for the configured milliseconds, the manager records
+`ServerTimeout`, closes the socket, and follows its retry policy. Checks are disabled
+by default and do not time out connection attempts. Choose a timeout longer than
+the heartbeat interval, with room for network and scheduling delays.
 
 
 # Configuration
