@@ -128,7 +128,7 @@ there is no buffering or replay.
 # Caller-initiated dis- and reconnects
 
 Call `fail` when your application determines that the current connection is unusable:
-`Connection.fail "Server stopped responding" model.connection`. This records an
+`Connection.fail "Update sequence gap" model.connection`. This records an
 `ApplicationError`, closes the socket, and follows the configured retry schedule
 and attempt limit. It works while connecting or connected; repeated calls while
 waiting to retry or after exhaustion do nothing.
