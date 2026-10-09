@@ -1,5 +1,5 @@
 module WebsocketSimple.Connection exposing
-    ( Config, config, withSchedule, withLimit, withHandle, withHandleReuse, withProtocols
+    ( Config, config, withSchedule, withLimit, withHandle, withHandleReuse, withProtocols, withServerTimeout
     , Model, Msg, Event(..), Action(..), Failure(..)
     , init, update, fail, reconnect, state, get
     , receive, subscribe, perform, send, sendBinary
@@ -153,9 +153,34 @@ Both functions return a model and an action to pass to `perform`:
         )
 
 
+# Server liveness
+
+Enable an inactivity timeout with `Connection.withServerTimeout 45000`. The clock
+starts when the connection opens; every incoming text or binary frame counts as
+activity. If the server stays silent for the configured milliseconds, the manager
+records `ServerTimeout`, closes the socket, and follows its retry policy. Checks
+are disabled by default and do not time out connection attempts.
+
+The server can send periodic heartbeat messages when it has no other data to send.
+An empty binary frame works well: the application can discard `Binary` events whose
+payload has `Bytes.width` zero. The JSON adapter passes binary frames through too,
+so these heartbeats need no JSON representation. Choose a timeout longer than the
+heartbeat interval, with room for network and scheduling delays.
+
+WebSocket protocol ping/pong is separate. Browsers automatically answer server
+pings, but JavaScript cannot send or observe those control frames. They therefore
+do not count as activity here; use application-visible data frames instead.
+
+There is one watchdog timer per established connection. Incoming data updates its
+last-activity time without restarting the timer. When it wakes, the manager either
+fails the connection or schedules the remaining time until the current deadline.
+JSON decoding failures still count as activity; outgoing messages and transport
+errors do not.
+
+
 # Configuration
 
-@docs Config, config, withSchedule, withLimit, withHandle, withHandleReuse, withProtocols
+@docs Config, config, withSchedule, withLimit, withHandle, withHandleReuse, withProtocols, withServerTimeout
 
 
 # State and transitions
@@ -175,6 +200,9 @@ import Again.Remote as Remote
 import Again.Remote.Cmd as RemoteCmd
 import Again.Schedule exposing (Schedule(..))
 import Bytes exposing (Bytes)
+import Process
+import Task
+import Time exposing (Posix)
 import WebsocketSimple as Ws
 
 
@@ -191,6 +219,7 @@ type alias Settings =
     , protocols : List String
     , namespace : Ws.Handle
     , reuseHandle : Bool
+    , serverTimeout : Maybe Float
     , policy : Policy
     }
 
@@ -204,6 +233,7 @@ config url =
         , protocols = []
         , namespace = Ws.handle "default"
         , reuseHandle = False
+        , serverTimeout = Nothing
         , policy =
             Policy.unlimited
                 (ImmediatelyThen
@@ -263,6 +293,38 @@ withProtocols protocols (Config settings) =
     Config { settings | protocols = protocols }
 
 
+{-| Reconnect after this many milliseconds without incoming data on an established
+connection. Disabled by default. Nonpositive or non-finite values disable checks.
+-}
+withServerTimeout : Float -> Config -> Config
+withServerTimeout milliseconds (Config settings) =
+    Config
+        { settings
+            | serverTimeout =
+                if milliseconds > 0 && not (isInfinite milliseconds) then
+                    Just milliseconds
+
+                else
+                    Nothing
+        }
+
+
+{-| The latest receipt is awaiting its clock reading or has been timestamped.
+-}
+type Activity
+    = Pending Int
+    | Observed Posix
+
+
+{-| Latest activity and the single outstanding watchdog, with distinct callback IDs.
+-}
+type alias Watchdog =
+    { activity : Activity
+    , timer : Maybe Int
+    , serial : Int
+    }
+
+
 {-| A retrying connection whose successful value is its connected socket handle.
 -}
 type Model
@@ -270,14 +332,17 @@ type Model
         { settings : Settings
         , remote : Remote.Remote Failure Ws.Handle
         , generation : Int
+        , watchdog : Maybe Watchdog
         }
 
 
-{-| Socket input or a scheduled retry. Route these messages back to `update`.
+{-| Socket input, clock readings, or a scheduled retry. Route these messages back to `update`.
 -}
 type Msg
     = Socket ( Ws.Handle, Ws.RawMsg )
     | Retry Int
+    | ActivityAt Int Int Posix
+    | CheckServer Int Int Posix
 
 
 {-| Application events from the managed connection. `Established` includes the
@@ -295,12 +360,16 @@ type Event
 {-| One connection transition's effect, interpreted by `perform`. `Close` carries
 an optional retry delay in milliseconds and the message to deliver afterwards.
 `Replace` swaps the old handle's socket for a new connection without a retry delay.
+`ReadTime` timestamps activity; `CheckAt` waits until a deadline and supplies the
+actual wakeup time. Their callbacks return messages for `update`.
 -}
 type Action
     = None
     | Open Ws.Handle String (List String)
     | Close Ws.Handle (Maybe ( Float, Msg ))
     | Replace Ws.Handle Ws.Handle String (List String)
+    | ReadTime (Posix -> Msg)
+    | CheckAt Posix (Posix -> Msg)
 
 
 {-| The reason a connection was lost or an attempt failed.
@@ -309,6 +378,7 @@ type Failure
     = Closed Ws.CloseDetails
     | TransportError Ws.TransportErrorDetails
     | ApplicationError String
+    | ServerTimeout
 
 
 {-| Begin the first connection attempt.
@@ -321,6 +391,7 @@ init (Config settings) =
                 { settings = settings
                 , remote = Remote.init settings.policy
                 , generation = 1
+                , watchdog = Nothing
                 }
     in
     ( model, open model )
@@ -337,13 +408,19 @@ reconnection without emitting an application event. Other errors are reported as
 update : Msg -> Model -> ( Model, Action, Maybe Event )
 update msg ((Model model) as original) =
     case msg of
+        ActivityAt generation receipt now ->
+            recordActivity generation receipt now original |> withoutEvent
+
+        CheckServer generation timer now ->
+            checkServer generation timer now original |> withoutEvent
+
         Retry generation ->
             case Remote.state model.remote of
                 Remote.WaitingForRetry _ ->
                     if generation == model.generation then
                         let
                             next =
-                                Model { model | remote = Remote.beginRetry model.remote, generation = model.generation + 1 }
+                                Model { model | remote = Remote.beginRetry model.remote, generation = model.generation + 1, watchdog = Nothing }
                         in
                         ( next, open next, Nothing )
 
@@ -360,7 +437,7 @@ update msg ((Model model) as original) =
             else
                 case event of
                     Ws.Connected protocol ->
-                        ( Model { model | remote = Remote.succeed handle model.remote }, None, Just (Established protocol) )
+                        observe (Established protocol) (Model { model | remote = Remote.succeed handle model.remote })
 
                     Ws.Disconnected details ->
                         failed (Closed details) original |> withoutEvent
@@ -377,10 +454,113 @@ update msg ((Model model) as original) =
                                 ( original, None, Just (Error error) )
 
                     Ws.Text body ->
-                        ( original, None, Just (Text body) )
+                        observe (Text body) original
 
                     Ws.Binary body ->
-                        ( original, None, Just (Binary body) )
+                        observe (Binary body) original
+
+
+{-| Mark activity immediately, so an outstanding clock read cannot cause a false timeout.
+-}
+observe : Event -> Model -> ( Model, Action, Maybe Event )
+observe event ((Model model) as original) =
+    if model.settings.serverTimeout /= Nothing && get original /= Nothing then
+        let
+            watchdog =
+                Maybe.withDefault { activity = Pending 0, timer = Nothing, serial = 0 } model.watchdog
+
+            receipt =
+                watchdog.serial + 1
+        in
+        ( Model { model | watchdog = Just { watchdog | activity = Pending receipt, serial = receipt } }
+        , ReadTime (ActivityAt model.generation receipt)
+        , Just event
+        )
+
+    else
+        ( original, None, Just event )
+
+
+{-| Retain only the newest receipt's timestamp, starting a timer only when none is pending.
+-}
+recordActivity : Int -> Int -> Posix -> Model -> ( Model, Action )
+recordActivity generation receipt now ((Model model) as original) =
+    case ( model.watchdog, model.settings.serverTimeout ) of
+        ( Just watchdog, Just timeout ) ->
+            if generation == model.generation && watchdog.activity == Pending receipt then
+                let
+                    next =
+                        Model { model | watchdog = Just { watchdog | activity = Observed now } }
+                in
+                if watchdog.timer == Nothing then
+                    scheduleServer (deadline now timeout) next
+
+                else
+                    ( next, None )
+
+            else
+                ( original, None )
+
+        _ ->
+            ( original, None )
+
+
+{-| Consume the active timer, deferring expiry while a newer receipt awaits its timestamp.
+-}
+checkServer : Int -> Int -> Posix -> Model -> ( Model, Action )
+checkServer generation timer now ((Model model) as original) =
+    case ( model.watchdog, model.settings.serverTimeout ) of
+        ( Just watchdog, Just timeout ) ->
+            if generation == model.generation && watchdog.timer == Just timer then
+                let
+                    next =
+                        Model { model | watchdog = Just { watchdog | timer = Nothing } }
+                in
+                case watchdog.activity of
+                    Pending _ ->
+                        ( next, None )
+
+                    Observed lastMessage ->
+                        let
+                            expires =
+                                deadline lastMessage timeout
+                        in
+                        if Time.posixToMillis now >= Time.posixToMillis expires then
+                            failed ServerTimeout next
+
+                        else
+                            scheduleServer expires next
+
+            else
+                ( original, None )
+
+        _ ->
+            ( original, None )
+
+
+{-| Arm one watchdog with a fresh identity within this connection attempt.
+-}
+scheduleServer : Posix -> Model -> ( Model, Action )
+scheduleServer expires ((Model model) as original) =
+    case model.watchdog of
+        Just watchdog ->
+            let
+                timer =
+                    watchdog.serial + 1
+            in
+            ( Model { model | watchdog = Just { watchdog | timer = Just timer, serial = timer } }
+            , CheckAt expires (CheckServer model.generation timer)
+            )
+
+        Nothing ->
+            ( original, None )
+
+
+{-| Compute an inactivity deadline, rounding fractional milliseconds upwards.
+-}
+deadline : Posix -> Float -> Posix
+deadline lastMessage timeout =
+    Time.millisToPosix (Time.posixToMillis lastMessage + ceiling timeout)
 
 
 {-| Adapt a lifecycle transition that does not produce an application event.
@@ -412,7 +592,7 @@ reconnect : Model -> ( Model, Action )
 reconnect ((Model model) as original) =
     let
         next =
-            Model { model | remote = Remote.init model.settings.policy, generation = model.generation + 1 }
+            Model { model | remote = Remote.init model.settings.policy, generation = model.generation + 1, watchdog = Nothing }
     in
     ( next
     , if active original then
@@ -432,7 +612,7 @@ failed error ((Model model) as original) =
             ( remote, delay ) =
                 Remote.fail error model.remote
         in
-        ( Model { model | remote = remote }
+        ( Model { model | remote = remote, watchdog = Nothing }
         , Close (currentHandle original)
             (Maybe.map (\milliseconds -> ( milliseconds, Retry model.generation )) delay)
         )
@@ -544,6 +724,21 @@ perform commandPort wrap action =
     case action of
         None ->
             Cmd.none
+
+        ReadTime callback ->
+            Time.now |> Task.perform (callback >> wrap)
+
+        CheckAt expires callback ->
+            Time.now
+                |> Task.andThen
+                    (\now ->
+                        Process.sleep
+                            (toFloat (Time.posixToMillis expires - Time.posixToMillis now)
+                                |> clamp 0 2147483647
+                            )
+                    )
+                |> Task.andThen (\_ -> Time.now)
+                |> Task.perform (callback >> wrap)
 
         Open handle url protocols ->
             Ws.sendWithHandle commandPort handle (Ws.Open url protocols)

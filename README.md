@@ -71,7 +71,9 @@ config =
         |> Connection.withLimit (MaxAttempts 10)
 ```
 
-The manager does not implement heartbeats. When your application detects a missing heartbeat, `Connection.fail "Heartbeat missing" model.connection` closes the current socket and schedules a replacement. It neither queues outgoing messages nor replays missed traffic.
+Enable `Connection.withServerTimeout 45000` to reconnect after 45 seconds without incoming text or binary data on an established connection. Checks are disabled by default. A server can send empty binary frames as heartbeats; applications can discard them, including through the JSON adapter. Leave room between the heartbeat interval and timeout for network and scheduling delays. Browser-managed protocol ping/pong is not visible to Elm and does not reset this timeout.
+
+Use `Connection.fail "Update sequence gap" model.connection` when your application determines that an established connection is unusable. It closes the socket and follows the retry policy. No outgoing messages are buffered or replayed.
 
 For JSON protocols, use `WebsocketSimple.Connection.Json.update` with your decoder and `Json.send` with your encoder. It uses the same connection model and actions. Incoming text becomes `Received value` or `PayloadDecodeFailure text error`; binary frames pass through unchanged. Decode failures do not disconnect automatically; the application can call `Connection.fail` if needed.
 
