@@ -12,7 +12,7 @@ one minute between attempts. There is no attempt limit. An established connectio
 resets the backoff.
 
 Using the application-owned ports described in `WebsocketSimple`, this example
-counts palindromes returned by an echo server:
+replies to server-sent text with its reverse and counts palindromic inputs:
 
     import WebsocketPorts as Ports
     import WebsocketSimple as Ws
@@ -25,57 +25,70 @@ counts palindromes returned by an echo server:
 
     type Msg
         = ConnectionMsg Connection.Msg
-        | SendMessage String
 
     init : () -> ( Model, Cmd Msg )
     init _ =
         let
             ( connection, actions ) =
-                Connection.init (Connection.config "wss://example.com/echo")
+                Connection.init (Connection.config "wss://example.com/messages")
         in
         ( { connection = connection, palindromes = 0 }
         , Connection.perform Ports.wsCmd ConnectionMsg actions
         )
 
     update : Msg -> Model -> ( Model, Cmd Msg )
-    update msg model =
-        case msg of
-            ConnectionMsg event ->
+    update (ConnectionMsg msg) model =
+        let
+            ( connection, actions, incoming ) =
+                Connection.update msg model.connection
+
+            updated =
+                { model | connection = connection }
+
+            ( next, command ) =
+                case incoming of
+                    Just event ->
+                        handleEvent event updated
+
+                    Nothing ->
+                        ( updated, Cmd.none )
+        in
+        ( next
+        , Cmd.batch [ Connection.perform Ports.wsCmd ConnectionMsg actions, command ]
+        )
+
+    handleEvent : Connection.Event -> Model -> ( Model, Cmd Msg )
+    handleEvent event model =
+        case event of
+            Connection.Text body ->
                 let
-                    ( connection, actions, incoming ) =
-                        Connection.update event model.connection
+                    reversed =
+                        String.reverse body
 
-                    palindromes =
-                        case incoming of
-                            Just (Connection.Text body) ->
-                                if body == String.reverse body then
-                                    model.palindromes + 1
+                    next =
+                        if body == reversed then
+                            { model | palindromes = model.palindromes + 1 }
 
-                                else
-                                    model.palindromes
-
-                            _ ->
-                                model.palindromes
+                        else
+                            model
                 in
-                ( { model | connection = connection, palindromes = palindromes }
-                , Connection.perform Ports.wsCmd ConnectionMsg actions
-                )
-
-            SendMessage body ->
-                ( model
+                ( next
                 , case Connection.get model.connection of
                     Just handle ->
-                        Ws.sendWithHandle Ports.wsCmd handle (Ws.Transmit body)
+                        Ws.sendWithHandle Ports.wsCmd handle (Ws.Transmit reversed)
 
                     Nothing ->
                         Cmd.none
                 )
 
+            _ ->
+                ( model, Cmd.none )
+
     subscriptions : Model -> Sub Msg
     subscriptions _ =
         Connection.subscribe Ports.wsMsg |> Sub.map ConnectionMsg
 
-`SendMessage "racecar"` sends text when connected. Each palindromic reply
+Receiving `"ABC"` sends back `"CBA"`. Receiving `"ABA"` sends back `"ABA"` and
 increments `palindromes`.
 
 
