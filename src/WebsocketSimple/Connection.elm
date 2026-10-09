@@ -92,6 +92,18 @@ Receiving `"ABC"` sends back `"CBA"`. Receiving `"ABA"` sends back `"ABA"` and
 increments `palindromes`.
 
 
+# Delayed replies
+
+A send command retains the handle it was created with, so immediate replies need
+no extra bookkeeping. For asynchronous work, capture the handle from `get` when
+starting the work and compare it with `get` when the result arrives. Discard the
+result if the handles no longer match.
+
+Alternatively, use `Established` to reset your protocol state and invalidate queued
+work or outstanding request IDs. This event is emitted for each successful
+connection, after the manager stores the new handle.
+
+
 # Configuration
 
 @docs Config, config, withSchedule, withLimit, withHandle, withProtocols
