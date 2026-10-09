@@ -7,27 +7,43 @@ module WebsocketSimple.Connection exposing
 
 {-| Keep a WebSocket connected, retrying when the connection is lost.
 
-    import WebsocketSimple.Connection as Connection
-
-    config =
-        Connection.config "wss://example.com/socket"
-
 Retries use exponential backoff: one second, two seconds, four seconds, up to
 one minute between attempts. There is no attempt limit. An established connection
 resets the backoff.
 
-`init`, `update`, and `fail` return actions without performing I/O. Execute them
-with `Connection.perform Ports.wsCmd ConnectionMsg actions`, and feed the resulting
-messages back to `update`.
+Using the application-owned ports described in `WebsocketSimple`:
 
-Subscribe with `Connection.subscribe Ports.wsMsg |> Sub.map ConnectionMsg`.
-`update` returns application events for established connections, received data,
-and errors that do not trigger reconnection. See the [managed example](https://github.com/mbr/elm-wss/blob/main/example/src/Managed.elm)
-for a complete model and update function.
+    import WebsocketPorts as Ports
+    import WebsocketSimple.Connection as Connection
 
-Use `get` to obtain a connected handle for sending through `WebsocketSimple`.
-Application protocols own their heartbeats; call `fail` when the current
-connection needs replacing.
+    type alias Model =
+        Connection.Model
+
+    type Msg
+        = ConnectionMsg Connection.Msg
+
+    init : () -> ( Model, Cmd Msg )
+    init _ =
+        let
+            ( model, actions ) =
+                Connection.init (Connection.config "wss://example.com/socket")
+        in
+        ( model, Connection.perform Ports.wsCmd ConnectionMsg actions )
+
+    update : Msg -> Model -> ( Model, Cmd Msg )
+    update (ConnectionMsg msg) model =
+        let
+            ( next, actions, _ ) =
+                Connection.update msg model
+        in
+        ( next, Connection.perform Ports.wsCmd ConnectionMsg actions )
+
+    subscriptions : Model -> Sub Msg
+    subscriptions _ =
+        Connection.subscribe Ports.wsMsg |> Sub.map ConnectionMsg
+
+The third result of `update` carries application events. Use `get` to obtain a
+connected handle for sending through `WebsocketSimple`.
 
 
 # Configuration
