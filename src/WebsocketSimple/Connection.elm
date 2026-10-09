@@ -5,14 +5,17 @@ module WebsocketSimple.Connection exposing
     , receive, subscribe, perform, send, sendBinary
     )
 
-{-| Keep a WebSocket connected, retrying when the connection is lost.
+{-| A managed WebSocket connection.
 
-Retry immediately, then use exponential backoff: 250 milliseconds, 500 milliseconds,
-one second, up to one minute between attempts. There is no attempt limit.
-An established connection resets the backoff.
+The `Connection` manager keeps a WebSocket connection established and reconnects when
+the connection is lost for any reason, by default with a 250 ms exponential backoff,
+reaching up to a minute of delay.
 
-Using the application-owned ports described in `WebsocketSimple`, this example
-replies to server-sent text with its reverse and counts palindromic inputs:
+It also tracks connections through a unique handle, see Delayed Replies below. Connection
+handling is removed as a concern from the user, see the following example:
+
+Using the application-owned ports described in `WebsocketSimple`, we reply
+replies to server-sent text with its reverse and count palindromic inputs:
 
     import WebsocketPorts as Ports
     import WebsocketSimple.Connection as Connection
@@ -94,14 +97,25 @@ increments `palindromes`.
 
 # Delayed replies
 
-A send command retains the handle it was created with, so immediate replies need
-no extra bookkeeping. For asynchronous work, capture the handle from `get` when
-starting the work and compare it with `get` when the result arrives. Discard the
-result if the handles no longer match.
+Every time a new connection is established, the `Connection` manager stores it's
+handle, and generates a fresh on for each reconnection attempt. If a reply is sent
+to a message in `update` immediately, it is guaranteed to be sent on the same
+connection.
 
-Alternatively, use `Established` to reset your protocol state and invalidate queued
-work or outstanding request IDs. This event is emitted for each successful
-connection, after the manager stores the new handle.
+If messages are delayed, i.e. the handling `update` returns between receiving a
+message and sending a reply, if you want the message to not be sent potentially on
+a different connection, you need to do one of two things :
+
+  - TKTK
+  - TKTK
+
+This scheme means that state for an app is connection specific, i.e. usually none
+is retained between reconnects. For example, if your websocket sends an initial state
+followed by updates, it typically has connection state.
+
+If your connections are truly stateless, you can simply ignore both these mechanisms
+and configure TKTK to disabled different handles per connection. In this case, every
+message will go out on whatever connection is available.
 
 
 # Configuration
