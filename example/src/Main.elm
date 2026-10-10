@@ -92,7 +92,7 @@ update msg model =
 -}
 subscriptions : Model -> Sub Message
 subscriptions _ =
-    Sub.map WebsocketReceived <| Ws.subscribe Ports.wsMsg
+    Sub.map (.message >> WebsocketReceived) <| Ws.subscribe Ports.wsMsg
 
 
 {-| Main entry point

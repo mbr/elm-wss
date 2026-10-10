@@ -706,9 +706,9 @@ receive =
 
 {-| Subscribe to socket events through an application-owned event port.
 -}
-subscribe : Ws.EventPort ( Ws.Handle, Ws.RawMsg ) -> Sub Msg
+subscribe : Ws.EventPort (Ws.Event Ws.RawMsg) -> Sub Msg
 subscribe eventPort =
-    Ws.subscribeWithHandle eventPort |> Sub.map receive
+    Ws.subscribe eventPort |> Sub.map (\event -> receive ( event.handle, event.message ))
 
 
 {-| Execute one connection action through your application. A reused handle is

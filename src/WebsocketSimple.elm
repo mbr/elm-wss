@@ -24,8 +24,8 @@ module WebsocketSimple exposing
     ( CommandPort, EventPort
     , Cmd(..), CloseRequest, open, close, send, sendWithHandle
     , Handle, handle, handleToString
-    , RawMsg(..), CloseDetails, TransportErrorKind(..), TransportErrorDetails, subscribe, subscribeWithHandle, errorKindToString, errorToString
-    , Msg(..), subscribeMsg, subscribeMsgWithHandle, transmitMsg, transmitMsgWithHandle, parseIncoming
+    , Event, RawMsg(..), CloseDetails, TransportErrorKind(..), TransportErrorDetails, subscribe, errorKindToString, errorToString
+    , Msg(..), subscribeMsg, transmitMsg, transmitMsgWithHandle, parseIncoming
     )
 
 {-| A small, typed WebSocket client for Elm with a compact, auditable JavaScript runtime. It supports multiple connections, lifecycle events, and text, binary, or JSON messages.
@@ -49,7 +49,7 @@ Elm packages cannot declare ports. Make `Main.elm` a `port module`, or use anoth
 
 The JavaScript runtime expects the exact port names `wsCmd` and `wsMsg`.
 
-Copy [`js/elm-websockets.js`](https://github.com/mbr/elm-wss/blob/2.0.0/js/elm-websockets.js) into the browser assets. Load the runtime and compiled Elm application, initialize Elm, and then initialize the runtime:
+Copy [`js/elm-websockets.js`](https://github.com/mbr/elm-wss/blob/master/js/elm-websockets.js) into the browser assets. Load the runtime and compiled Elm application, initialize Elm, and then initialize the runtime:
 
 ```html
 <script src="elm-websockets.js"></script>
@@ -106,7 +106,7 @@ Subscribe to events before opening a connection, and wait for `Connected` before
 
     subscriptions : List String -> Sub Msg
     subscriptions _ =
-        Sub.map WebSocketEvent (WebSocket.subscribe Ports.wsMsg)
+        Sub.map (.message >> WebSocketEvent) (WebSocket.subscribe Ports.wsMsg)
 
 
 # Commands
@@ -140,16 +140,17 @@ Each connection is identified by an opaque handle encoded as a string at the por
 
 # Events
 
-`subscribe` discards handle information. Use `subscribeWithHandle` to distinguish events from multiple connections.
+Every subscription delivers an `Event` containing the message, originating handle,
+and monotonic event timestamp. Select `.message` if you do not need the metadata.
 
     type Msg
-        = WebSocketEvent ( WebSocket.Handle, WebSocket.RawMsg )
+        = WebSocketEvent (WebSocket.Event WebSocket.RawMsg)
 
     subscriptions : model -> Sub Msg
     subscriptions _ =
-        Sub.map WebSocketEvent (WebSocket.subscribeWithHandle Ports.wsMsg)
+        Sub.map WebSocketEvent (WebSocket.subscribe Ports.wsMsg)
 
-@docs RawMsg, CloseDetails, TransportErrorKind, TransportErrorDetails, subscribe, subscribeWithHandle, errorKindToString, errorToString
+@docs Event, RawMsg, CloseDetails, TransportErrorKind, TransportErrorDetails, subscribe, errorKindToString, errorToString
 
 
 # JSON
@@ -170,9 +171,9 @@ Regular subscriptions expose incoming text and binary frames as `Text String` an
 
     subscriptions : model -> Sub Msg
     subscriptions _ =
-        WebSocket.subscribeMsg Ports.wsMsg payloadDecoder WebSocketMessage
+        WebSocket.subscribeMsg Ports.wsMsg payloadDecoder (.message >> WebSocketMessage)
 
-@docs Msg, subscribeMsg, subscribeMsgWithHandle, transmitMsg, transmitMsgWithHandle, parseIncoming
+@docs Msg, subscribeMsg, transmitMsg, transmitMsgWithHandle, parseIncoming
 
 -}
 
@@ -191,10 +192,22 @@ type alias CommandPort msg =
     ( String, String, E.Value ) -> Platform.Cmd.Cmd msg
 
 
-{-| Type of an application-owned port that receives encoded events from the JavaScript runtime.
+{-| An application-owned port receiving timestamped socket events.
+
+Incoming events are `(timestamp, (handle, kind, payload))`.
+
 -}
 type alias EventPort msg =
-    (( String, String, E.Value ) -> msg) -> Sub msg
+    (( Float, ( String, String, E.Value ) ) -> msg) -> Sub msg
+
+
+{-| A socket message with its handle and monotonic event timestamp in milliseconds.
+-}
+type alias Event message =
+    { timestamp : Float
+    , handle : Handle
+    , message : message
+    }
 
 
 {-| Identifies a particular WebSocket connection.
@@ -301,41 +314,28 @@ errorKindToString kind =
             "PortDecodingFailure"
 
 
-{-| Subscribe to raw events paired with their originating handles.
+{-| Subscribe to raw events with their originating handles and monotonic event timestamps.
 -}
-subscribeWithHandle : EventPort ( Handle, RawMsg ) -> Sub ( Handle, RawMsg )
-subscribeWithHandle eventPort =
-    eventPort decodeWsMsg
-
-
-{-| Subscribe to raw events from the implicit default connection.
-
-This discards the originating handle from every event.
-
--}
-subscribe : EventPort RawMsg -> Sub RawMsg
+subscribe : EventPort (Event RawMsg) -> Sub (Event RawMsg)
 subscribe eventPort =
-    eventPort (decodeWsMsg >> Tuple.second)
+    eventPort decodeEvent
 
 
-{-| Subscribe to typed JSON events while discarding handle information.
+{-| Subscribe to typed JSON events, preserving their handles and timestamps.
 -}
-subscribeMsg : EventPort msg -> D.Decoder t -> (Msg t -> msg) -> Sub msg
+subscribeMsg : EventPort msg -> D.Decoder t -> (Event (Msg t) -> msg) -> Sub msg
 subscribeMsg eventPort dec wrap =
-    eventPort (decodeWsMsg >> Tuple.second >> parseIncoming dec >> wrap)
-
-
-{-| Subscribe to typed JSON events paired with their originating handles.
--}
-subscribeMsgWithHandle : EventPort msg -> D.Decoder t -> (( Handle, Msg t ) -> msg) -> Sub msg
-subscribeMsgWithHandle eventPort dec wrap =
     eventPort
         (\value ->
             let
-                ( socketHandle, rawMsg ) =
-                    decodeWsMsg value
+                event =
+                    decodeEvent value
             in
-            wrap ( socketHandle, parseIncoming dec rawMsg )
+            wrap
+                { timestamp = event.timestamp
+                , handle = event.handle
+                , message = parseIncoming dec event.message
+                }
         )
 
 
@@ -725,6 +725,20 @@ decodeCloseDetails =
         (D.field "reason" D.string)
         (D.field "wasClean" D.bool)
         (D.field "initiatedLocally" D.bool)
+
+
+{-| Preserve the event timestamp alongside the decoded message and its handle.
+-}
+decodeEvent : ( Float, ( String, String, E.Value ) ) -> Event RawMsg
+decodeEvent ( timestamp, payload ) =
+    let
+        ( socketHandle, message ) =
+            decodeWsMsg payload
+    in
+    { timestamp = timestamp
+    , handle = socketHandle
+    , message = message
+    }
 
 
 {-| Decode an event from the JavaScript runtime.

@@ -45,7 +45,7 @@ update msg model =
 
 subscriptions : Model -> Sub Msg
 subscriptions _ =
-    Sub.map WebSocketEvent (Ws.subscribe Ports.wsMsg)
+    Sub.map (.message >> WebSocketEvent) (Ws.subscribe Ports.wsMsg)
 ```
 
 See the [`WebsocketSimple` package documentation](https://package.elm-lang.org/packages/mbr/elm-wss/latest/WebsocketSimple) for installation, multiple connections, close details, and typed JSON messages.

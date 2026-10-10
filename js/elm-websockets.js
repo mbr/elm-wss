@@ -25,9 +25,9 @@ ElmWebsockets = (function() {
     if (app.ports && app.ports.wsCmd) {
       app.webSockets = new Map();
 
-      function emit(message) {
+      function emit(message, timestamp) {
         if (app.ports.wsMsg) {
-          app.ports.wsMsg.send(message);
+          app.ports.wsMsg.send([timestamp, message]);
         }
       }
 
@@ -36,7 +36,7 @@ ElmWebsockets = (function() {
       }
 
       function emitError(handle, kind, message) {
-        emit(makeError(handle, kind, message));
+        emit(makeError(handle, kind, message), performance.now());
       }
 
       function makeReportedError(handle, operation, error) {
@@ -50,20 +50,21 @@ ElmWebsockets = (function() {
       }
 
       function reportError(handle, operation, error) {
-        emit(makeReportedError(handle, operation, error));
+        emit(makeReportedError(handle, operation, error), performance.now());
       }
 
-      function deliverIncoming(entry, message, closes) {
+      function deliverIncoming(entry, message, closes, timestamp) {
         if (closes) {
           app.webSockets.delete(entry.handle);
         }
-        emit(message);
+        emit(message, timestamp);
       }
 
-      function reserveIncoming(entry) {
+      function reserveIncoming(entry, timestamp) {
         var incomingEvent = {
           closes: false,
-          message: null
+          message: null,
+          timestamp: timestamp
         };
         entry.incomingEvents.push(incomingEvent);
         return incomingEvent;
@@ -80,7 +81,7 @@ ElmWebsockets = (function() {
           }
 
           entry.nextIncomingEvent++;
-          deliverIncoming(entry, incomingEvent.message, incomingEvent.closes);
+          deliverIncoming(entry, incomingEvent.message, incomingEvent.closes, incomingEvent.timestamp);
         }
 
         entry.incomingEvents = [];
@@ -94,13 +95,13 @@ ElmWebsockets = (function() {
         }
       }
 
-      function queueIncoming(entry, message, closes) {
+      function queueIncoming(entry, message, closes, timestamp) {
         if (entry.incomingEvents.length === 0) {
-          deliverIncoming(entry, message, closes);
+          deliverIncoming(entry, message, closes, timestamp);
           return;
         }
 
-        entry.incomingEvents.push({ closes: closes, message: message });
+        entry.incomingEvents.push({ closes: closes, message: message, timestamp: timestamp });
         drainIncoming(entry);
       }
 
@@ -244,7 +245,8 @@ ElmWebsockets = (function() {
                     wasClean: Boolean(closeEvent.wasClean)
                   }
                 ],
-                true
+                true,
+                closeEvent.timeStamp
               );
             };
             ws.onerror = function(errorEvent) {
@@ -254,7 +256,8 @@ ElmWebsockets = (function() {
               queueIncoming(
                 entry,
                 makeReportedError(handle, "transport", errorEvent),
-                false
+                false,
+                errorEvent.timeStamp
               );
             };
             ws.onmessage = function(messageEvent) {
@@ -266,13 +269,14 @@ ElmWebsockets = (function() {
                 queueIncoming(
                   entry,
                   [handle, "message", messageEvent.data],
-                  false
+                  false,
+                  messageEvent.timeStamp
                 );
               } else if (
                 typeof Blob !== "undefined" &&
                 messageEvent.data instanceof Blob
               ) {
-                var incomingEvent = reserveIncoming(entry);
+                var incomingEvent = reserveIncoming(entry, messageEvent.timeStamp);
                 readBlob(
                   messageEvent.data,
                   function(byteString) {
@@ -298,11 +302,12 @@ ElmWebsockets = (function() {
                     "unsupported-data",
                     "received unsupported websocket message data"
                   ),
-                  false
+                  false,
+                  messageEvent.timeStamp
                 );
               }
             };
-            ws.onopen = function() {
+            ws.onopen = function(openEvent) {
               if (
                 app.webSockets.get(handle) !== entry ||
                 ws.readyState !== WebSocket.OPEN
@@ -310,7 +315,7 @@ ElmWebsockets = (function() {
                 return;
               }
 
-              emit([handle, "connected", ws.protocol || null]);
+              emit([handle, "connected", ws.protocol || null], openEvent.timeStamp);
             };
             break;
 
