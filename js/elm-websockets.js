@@ -27,7 +27,12 @@ ElmWebsockets = (function() {
 
       function emit(message, timestamp) {
         if (app.ports.wsMsg) {
-          app.ports.wsMsg.send([timestamp, message]);
+          app.ports.wsMsg.send({
+            timestamp: timestamp,
+            handle: message[0],
+            kind: message[1],
+            payload: message[2]
+          });
         }
       }
 

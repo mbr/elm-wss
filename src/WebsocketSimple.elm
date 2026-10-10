@@ -21,7 +21,7 @@
 
 
 module WebsocketSimple exposing
-    ( CommandPort, EventPort
+    ( CommandPort, EventPort, Incoming
     , Cmd(..), CloseRequest, open, close, send, sendWithHandle
     , Handle, handle, handleToString
     , Event, RawMsg(..), CloseDetails, TransportErrorKind(..), TransportErrorDetails, subscribe, errorKindToString, errorToString
@@ -69,7 +69,7 @@ The JavaScript initialization is a no-op when the application does not contain t
 
 Pass the application-owned ports described by these aliases to commands and subscriptions.
 
-@docs CommandPort, EventPort
+@docs CommandPort, EventPort, Incoming
 
 
 # Basic usage
@@ -194,11 +194,21 @@ type alias CommandPort msg =
 
 {-| An application-owned port receiving timestamped socket events.
 
-Incoming events are `(timestamp, (handle, kind, payload))`.
+Incoming events are `{ timestamp, handle, kind, payload }`.
 
 -}
 type alias EventPort msg =
-    (( Float, ( String, String, E.Value ) ) -> msg) -> Sub msg
+    (Incoming -> msg) -> Sub msg
+
+
+{-| An encoded socket event received from JavaScript.
+-}
+type alias Incoming =
+    { timestamp : Float
+    , handle : String
+    , kind : String
+    , payload : D.Value
+    }
 
 
 {-| A socket message with its handle and monotonic event timestamp in milliseconds.
@@ -729,45 +739,33 @@ decodeCloseDetails =
 
 {-| Preserve the event timestamp alongside the decoded message and its handle.
 -}
-decodeEvent : ( Float, ( String, String, E.Value ) ) -> Event RawMsg
-decodeEvent ( timestamp, payload ) =
-    let
-        ( socketHandle, message ) =
-            decodeWsMsg payload
-    in
-    { timestamp = timestamp
-    , handle = socketHandle
-    , message = message
+decodeEvent : Incoming -> Event RawMsg
+decodeEvent incoming =
+    { timestamp = incoming.timestamp
+    , handle = Handle incoming.handle
+    , message =
+        case incoming.kind of
+            "connected" ->
+                decodeHelper (D.nullable D.string) Connected incoming.payload
+
+            "disconnected" ->
+                decodeHelper decodeCloseDetails Disconnected incoming.payload
+
+            "error" ->
+                decodeHelper decodeTransportError TransportError incoming.payload
+
+            "message" ->
+                decodeHelper D.string Text incoming.payload
+
+            "binary" ->
+                decodeHelper D.string (byteStringToBytes >> Binary) incoming.payload
+
+            _ ->
+                TransportError
+                    { kind = PortDecodingFailure
+                    , message = "received an invalid message through channel: " ++ incoming.kind
+                    }
     }
-
-
-{-| Decode an event from the JavaScript runtime.
--}
-decodeWsMsg : ( String, String, E.Value ) -> ( Handle, RawMsg )
-decodeWsMsg ( handleValue, kind, data ) =
-    ( Handle handleValue
-    , case kind of
-        "connected" ->
-            decodeHelper (D.nullable D.string) Connected data
-
-        "disconnected" ->
-            decodeHelper decodeCloseDetails Disconnected data
-
-        "error" ->
-            decodeHelper decodeTransportError TransportError data
-
-        "message" ->
-            decodeHelper D.string Text data
-
-        "binary" ->
-            decodeHelper D.string (byteStringToBytes >> Binary) data
-
-        _ ->
-            TransportError
-                { kind = PortDecodingFailure
-                , message = "received an invalid message through channel: " ++ kind
-                }
-    )
 
 
 
