@@ -9,6 +9,7 @@ import Again.Schedule exposing (Schedule(..))
 import Bytes.Decode as Decode
 import Bytes.Encode as Encode
 import Expect
+import SocketEvent
 import Test exposing (Test, describe, test)
 import WebsocketSimple as Ws
 import WebsocketSimple.Connection as Connection exposing (Action(..))
@@ -292,7 +293,7 @@ closed =
 -}
 incoming : Ws.Handle -> Ws.RawMsg -> Connection.Model -> ( Connection.Model, Action, Maybe Connection.Event )
 incoming handle event =
-    Connection.update (Connection.receive ( handle, event ))
+    Connection.update (SocketEvent.at 0 handle event)
 
 
 {-| Drive failed attempts, checking handle reuse and collecting their delays.

@@ -170,7 +170,8 @@ when the connection opens; every incoming text or binary frame counts as activit
 If the server stays silent for the configured milliseconds, the manager records
 `ServerTimeout`, closes the socket, and follows its retry policy. Checks are disabled
 by default and do not time out connection attempts. Choose a timeout longer than
-the heartbeat interval, with room for network and scheduling delays.
+the heartbeat interval, with room for network and scheduling delays. Watchdog
+callbacks use their scheduled time; delayed processing can postpone expiry.
 
 
 # Configuration
@@ -197,7 +198,6 @@ import Again.Schedule exposing (Schedule(..))
 import Bytes exposing (Bytes)
 import Process
 import Task
-import Time exposing (Posix)
 import WebsocketSimple as Ws
 
 
@@ -304,19 +304,12 @@ withServerTimeout milliseconds (Config settings) =
         }
 
 
-{-| The latest receipt is awaiting its clock reading or has been timestamped.
--}
-type Activity
-    = Pending Int
-    | Observed Posix
-
-
-{-| Latest activity and the single outstanding watchdog, with distinct callback IDs.
+{-| Activity relative to connection establishment and the outstanding timer's identity.
 -}
 type alias Watchdog =
-    { activity : Activity
-    , timer : Maybe Int
-    , serial : Int
+    { epoch : Float
+    , lastActivity : Float
+    , timer : Int
     }
 
 
@@ -331,19 +324,25 @@ type Model
         }
 
 
-{-| Socket input, clock readings, or a scheduled retry. Route these messages back to `update`.
+{-| Socket input or a scheduled wakeup. Route these messages back to `update`.
 -}
 type Msg
-    = Socket ( Ws.Handle, Ws.RawMsg )
+    = Socket (Ws.Event Ws.RawMsg)
     | Retry Int
-    | ActivityAt Int Int Posix
-    | CheckServer Int Int Posix
+    | CheckServer Int Int Float
 
 
-{-| Application events from the managed connection. `Established` includes the
-negotiated subprotocol and lets your application initialize each new connection.
-`Error` reports errors that do not trigger reconnection; connection loss and
-retry failures are available through `state` instead.
+{-| Application events from the managed connection.
+
+`Established` reports a successful connection and its negotiated subprotocol, if any.
+
+`Text` carries an incoming text frame.
+
+`Binary` carries an incoming binary frame, including empty heartbeat frames.
+
+`Error` reports a transport error that does not trigger reconnection. Failures
+that trigger reconnection are available through `state` instead.
+
 -}
 type Event
     = Established (Maybe String)
@@ -352,19 +351,26 @@ type Event
     | Error Ws.TransportErrorDetails
 
 
-{-| One connection transition's effect, interpreted by `perform`. `Close` carries
-an optional retry delay in milliseconds and the message to deliver afterwards.
-`Replace` swaps the old handle's socket for a new connection without a retry delay.
-`ReadTime` timestamps activity; `CheckAt` waits until a deadline and supplies the
-actual wakeup time. Their callbacks return messages for `update`.
+{-| Connection effects interpreted by `perform`.
+
+`None` performs no work.
+
+`Open` opens a socket with the supplied handle, URL, and requested subprotocols.
+
+`Close` closes a socket and optionally delivers a retry message after a delay in milliseconds.
+
+`Replace` closes the old socket and opens its replacement without a retry delay.
+
+`CheckAfter` delivers a watchdog message after a delay in milliseconds. The message
+carries its scheduled firing time; late callbacks can postpone expiry, not advance it.
+
 -}
 type Action
     = None
     | Open Ws.Handle String (List String)
     | Close Ws.Handle (Maybe ( Float, Msg ))
     | Replace Ws.Handle Ws.Handle String (List String)
-    | ReadTime (Posix -> Msg)
-    | CheckAt Posix (Posix -> Msg)
+    | CheckAfter Float Msg
 
 
 {-| The reason a connection was lost or an attempt failed.
@@ -403,9 +409,6 @@ reconnection without emitting an application event. Other errors are reported as
 update : Msg -> Model -> ( Model, Action, Maybe Event )
 update msg ((Model model) as original) =
     case msg of
-        ActivityAt generation receipt now ->
-            recordActivity generation receipt now original |> withoutEvent
-
         CheckServer generation timer now ->
             checkServer generation timer now original |> withoutEvent
 
@@ -425,14 +428,14 @@ update msg ((Model model) as original) =
                 _ ->
                     ( original, None, Nothing )
 
-        Socket ( handle, event ) ->
-            if handle /= currentHandle original || not (active original) then
+        Socket event ->
+            if event.handle /= currentHandle original || not (active original) then
                 ( original, None, Nothing )
 
             else
-                case event of
+                case event.message of
                     Ws.Connected protocol ->
-                        observe (Established protocol) (Model { model | remote = Remote.succeed handle model.remote })
+                        observe event.timestamp (Established protocol) (Model { model | remote = Remote.succeed event.handle model.remote })
 
                     Ws.Disconnected details ->
                         failed (Closed details) original |> withoutEvent
@@ -449,82 +452,54 @@ update msg ((Model model) as original) =
                                 ( original, None, Just (Error error) )
 
                     Ws.Text body ->
-                        observe (Text body) original
+                        observe event.timestamp (Text body) original
 
                     Ws.Binary body ->
-                        observe (Binary body) original
+                        observe event.timestamp (Binary body) original
 
 
-{-| Mark activity immediately, so an outstanding clock read cannot cause a false timeout.
+{-| Record native receipt time without restarting the outstanding watchdog.
 -}
-observe : Event -> Model -> ( Model, Action, Maybe Event )
-observe event ((Model model) as original) =
-    if model.settings.serverTimeout /= Nothing && get original /= Nothing then
-        let
-            watchdog =
-                Maybe.withDefault { activity = Pending 0, timer = Nothing, serial = 0 } model.watchdog
+observe : Float -> Event -> Model -> ( Model, Action, Maybe Event )
+observe timestamp event ((Model model) as original) =
+    case ( model.settings.serverTimeout, get original ) of
+        ( Just timeout, Just _ ) ->
+            case model.watchdog of
+                Just watchdog ->
+                    ( Model { model | watchdog = Just { watchdog | lastActivity = max watchdog.lastActivity (timestamp - watchdog.epoch) } }
+                    , None
+                    , Just event
+                    )
 
-            receipt =
-                watchdog.serial + 1
-        in
-        ( Model { model | watchdog = Just { watchdog | activity = Pending receipt, serial = receipt } }
-        , ReadTime (ActivityAt model.generation receipt)
-        , Just event
-        )
-
-    else
-        ( original, None, Just event )
-
-
-{-| Retain only the newest receipt's timestamp, starting a timer only when none is pending.
--}
-recordActivity : Int -> Int -> Posix -> Model -> ( Model, Action )
-recordActivity generation receipt now ((Model model) as original) =
-    case ( model.watchdog, model.settings.serverTimeout ) of
-        ( Just watchdog, Just timeout ) ->
-            if generation == model.generation && watchdog.activity == Pending receipt then
-                let
-                    next =
-                        Model { model | watchdog = Just { watchdog | activity = Observed now } }
-                in
-                if watchdog.timer == Nothing then
-                    scheduleServer (deadline now timeout) next
-
-                else
-                    ( next, None )
-
-            else
-                ( original, None )
+                Nothing ->
+                    let
+                        ( next, action ) =
+                            scheduleServer 0
+                                timeout
+                                (Model { model | watchdog = Just { epoch = timestamp, lastActivity = 0, timer = 0 } })
+                    in
+                    ( next, action, Just event )
 
         _ ->
-            ( original, None )
+            ( original, None, Just event )
 
 
-{-| Consume the active timer, deferring expiry while a newer receipt awaits its timestamp.
+{-| Check expiry at the timer's logical firing time, ignoring obsolete callbacks.
 -}
-checkServer : Int -> Int -> Posix -> Model -> ( Model, Action )
+checkServer : Int -> Int -> Float -> Model -> ( Model, Action )
 checkServer generation timer now ((Model model) as original) =
     case ( model.watchdog, model.settings.serverTimeout ) of
         ( Just watchdog, Just timeout ) ->
-            if generation == model.generation && watchdog.timer == Just timer then
+            if generation == model.generation && watchdog.timer == timer then
                 let
-                    next =
-                        Model { model | watchdog = Just { watchdog | timer = Nothing } }
+                    expires =
+                        watchdog.lastActivity + timeout
                 in
-                case watchdog.activity of
-                    Pending _ ->
-                        ( next, None )
+                if now >= expires then
+                    failed ServerTimeout original
 
-                    Observed lastMessage ->
-                        let
-                            expires =
-                                deadline lastMessage timeout
-                        in
-                        if Time.posixToMillis now >= Time.posixToMillis expires then
-                            failed ServerTimeout next
-
-                        else
-                            scheduleServer expires next
+                else
+                    scheduleServer (max now watchdog.lastActivity) expires original
 
             else
                 ( original, None )
@@ -533,29 +508,25 @@ checkServer generation timer now ((Model model) as original) =
             ( original, None )
 
 
-{-| Arm one watchdog with a fresh identity within this connection attempt.
+{-| Schedule one bounded sleep, advancing logical time only by the requested delay.
 -}
-scheduleServer : Posix -> Model -> ( Model, Action )
-scheduleServer expires ((Model model) as original) =
+scheduleServer : Float -> Float -> Model -> ( Model, Action )
+scheduleServer now expires ((Model model) as original) =
     case model.watchdog of
         Just watchdog ->
             let
                 timer =
-                    watchdog.serial + 1
+                    watchdog.timer + 1
+
+                delay =
+                    clamp 0 2147483647 (expires - now)
             in
-            ( Model { model | watchdog = Just { watchdog | timer = Just timer, serial = timer } }
-            , CheckAt expires (CheckServer model.generation timer)
+            ( Model { model | watchdog = Just { watchdog | timer = timer } }
+            , CheckAfter delay (CheckServer model.generation timer (now + delay))
             )
 
         Nothing ->
             ( original, None )
-
-
-{-| Compute an inactivity deadline, rounding fractional milliseconds upwards.
--}
-deadline : Posix -> Float -> Posix
-deadline lastMessage timeout =
-    Time.millisToPosix (Time.posixToMillis lastMessage + ceiling timeout)
 
 
 {-| Adapt a lifecycle transition that does not produce an application event.
@@ -697,9 +668,9 @@ open ((Model model) as original) =
     Open (currentHandle original) model.settings.url model.settings.protocols
 
 
-{-| Forward an event from an existing handled WebSocket subscription.
+{-| Forward a timestamped socket event.
 -}
-receive : ( Ws.Handle, Ws.RawMsg ) -> Msg
+receive : Ws.Event Ws.RawMsg -> Msg
 receive =
     Socket
 
@@ -708,11 +679,12 @@ receive =
 -}
 subscribe : Ws.EventPort (Ws.Event Ws.RawMsg) -> Sub Msg
 subscribe eventPort =
-    Ws.subscribe eventPort |> Sub.map (\event -> receive ( event.handle, event.message ))
+    Ws.subscribe eventPort |> Sub.map receive
 
 
 {-| Execute one connection action through your application. A reused handle is
 replaced with a single open command, which closes the old socket in the runtime.
+Fractional watchdog delays round up to avoid waking before their logical time.
 -}
 perform : Ws.CommandPort msg -> (Msg -> msg) -> Action -> Cmd msg
 perform commandPort wrap action =
@@ -720,20 +692,9 @@ perform commandPort wrap action =
         None ->
             Cmd.none
 
-        ReadTime callback ->
-            Time.now |> Task.perform (callback >> wrap)
-
-        CheckAt expires callback ->
-            Time.now
-                |> Task.andThen
-                    (\now ->
-                        Process.sleep
-                            (toFloat (Time.posixToMillis expires - Time.posixToMillis now)
-                                |> clamp 0 2147483647
-                            )
-                    )
-                |> Task.andThen (\_ -> Time.now)
-                |> Task.perform (callback >> wrap)
+        CheckAfter milliseconds message ->
+            Process.sleep (toFloat (ceiling milliseconds))
+                |> Task.perform (always (wrap message))
 
         Open handle url protocols ->
             Ws.sendWithHandle commandPort handle (Ws.Open url protocols)

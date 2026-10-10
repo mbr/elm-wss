@@ -7,6 +7,7 @@ import Again.Policy exposing (AttemptLimit(..))
 import Again.Remote as Remote
 import Again.Schedule exposing (Schedule(..))
 import Expect
+import SocketEvent
 import Test exposing (Test, describe, test)
 import WebsocketSimple as Ws
 import WebsocketSimple.Connection as Connection exposing (Action(..))
@@ -53,13 +54,13 @@ tests =
                             ( initial, Open first _ _ ) ->
                                 let
                                     ( connected, _, _ ) =
-                                        Connection.update (Connection.receive ( first, Ws.Connected Nothing )) initial
+                                        Connection.update (SocketEvent.at 0 first (Ws.Connected Nothing)) initial
                                 in
                                 case Connection.fail "initial failure" connected of
                                     ( waiting, Close _ (Just ( _, oldRetry )) ) ->
                                         case Connection.update oldRetry waiting of
                                             ( retrying, Open second _ _, _ ) ->
-                                                case Connection.update (Connection.receive ( second, Ws.Disconnected closed )) retrying of
+                                                case Connection.update (SocketEvent.at 0 second (Ws.Disconnected closed)) retrying of
                                                     ( exhausted, Close _ Nothing, Nothing ) ->
                                                         [ { name = "connecting", model = initial, handle = first, active = True }
                                                         , { name = "connected", model = connected, handle = first, active = True }
@@ -111,7 +112,7 @@ checkRestart reuse oldRetry scenario =
     in
     case opening of
         Just ( handle, url, protocols ) ->
-            case Connection.update (Connection.receive ( handle, Ws.Disconnected closed )) restarted of
+            case Connection.update (SocketEvent.at 0 handle (Ws.Disconnected closed)) restarted of
                 ( waiting, Close closing (Just ( delay, retry )), Nothing ) ->
                     let
                         ( afterStale, staleAction, staleEvent ) =
@@ -143,13 +144,13 @@ checkRestart reuse oldRetry scenario =
                             else
                                 let
                                     ( unchanged, lateAction, lateEvent ) =
-                                        Connection.update (Connection.receive ( scenario.handle, Ws.Disconnected closed )) restarted
+                                        Connection.update (SocketEvent.at 0 scenario.handle (Ws.Disconnected closed)) restarted
                                 in
                                 Expect.equal ( Remote.Attempting, None, Nothing ) ( Connection.state unchanged, lateAction, lateEvent )
                         , \_ ->
                             let
                                 ( connected, establishedAction, event ) =
-                                    Connection.update (Connection.receive ( handle, Ws.Connected (Just "example.v1") )) restarted
+                                    Connection.update (SocketEvent.at 0 handle (Ws.Connected (Just "example.v1"))) restarted
                             in
                             Expect.equal ( Just handle, None, Just (Connection.Established (Just "example.v1")) ) ( Connection.get connected, establishedAction, event )
                         ]
@@ -195,7 +196,7 @@ checkLimit retry model =
         ( attempting, Open handle _ _, Nothing ) ->
             let
                 ( exhausted, action, _ ) =
-                    Connection.update (Connection.receive ( handle, Ws.Disconnected closed )) attempting
+                    Connection.update (SocketEvent.at 0 handle (Ws.Disconnected closed)) attempting
 
                 ( unchanged, duplicateAction ) =
                     Connection.fail "ignored" exhausted

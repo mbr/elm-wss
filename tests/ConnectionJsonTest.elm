@@ -7,6 +7,7 @@ import Bytes.Decode as BytesDecode
 import Bytes.Encode as BytesEncode
 import Expect
 import Json.Decode as Decode
+import SocketEvent
 import Test exposing (Test, describe, test)
 import WebsocketSimple as Ws
 import WebsocketSimple.Connection as Connection
@@ -135,7 +136,7 @@ decoder =
 -}
 incoming : Ws.Handle -> Ws.RawMsg -> Connection.Model -> ( Connection.Model, Connection.Action, Maybe (Json.Event Int) )
 incoming handle event =
-    Json.update decoder (Connection.receive ( handle, event ))
+    Json.update decoder (SocketEvent.at 0 handle event)
 
 
 {-| Supply a pending connection and its initial socket handle.
